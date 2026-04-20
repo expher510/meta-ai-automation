@@ -13,8 +13,8 @@ on:
         description: 'n8n Webhook URL to send the result'
         required: true
         type: string
-      cookies_txt:
-        description: 'Netscape HTTP Cookie format string'
+      cookies_b64:
+        description: 'Base64 encoded Netscape HTTP Cookie string'
         required: true
         type: string
 
@@ -39,14 +39,12 @@ jobs:
       - name: Save Cookies to File (Workflow Dispatch)
         if: github.event_name == 'workflow_dispatch'
         run: |
-          # Use jq to safely read from the event payload file
-          jq -r '.inputs.cookies_txt' "$GITHUB_EVENT_PATH" > cookies.txt
+          jq -r '.inputs.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
 
       - name: Save Cookies to File (Repository Dispatch)
         if: github.event_name == 'repository_dispatch'
         run: |
-          # Use jq to safely extract cookies from client_payload
-          jq -r '.client_payload.cookies_txt' "$GITHUB_EVENT_PATH" > cookies.txt
+          jq -r '.client_payload.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
 
       - name: Run Playwright Script (Workflow Dispatch)
         if: github.event_name == 'workflow_dispatch'

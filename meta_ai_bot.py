@@ -14,9 +14,20 @@ def parse_netscape_cookies(file_path_or_content):
     # Check if it's a file path or raw content
     try:
         with open(file_path_or_content, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+            content = f.read()
     except OSError:
-        lines = file_path_or_content.splitlines()
+        content = file_path_or_content
+
+    # Try parsing as JSON first
+    try:
+        import json
+        cookies = json.loads(content)
+        if isinstance(cookies, list):
+            return cookies
+    except Exception:
+        pass
+
+    lines = content.splitlines()
 
     for line in lines:
         if line.startswith('#') or not line.strip():
@@ -74,13 +85,13 @@ def run(prompt, webhook_url, cookies_input):
             
         try:
             print("Looking for the chat input box...")
-            # Locate the chat input box (Meta AI usually uses a textarea for input)
-            # You might need to update this selector if Meta AI changes its DOM
-            chat_input = page.locator('textarea[placeholder*="Ask Meta AI"], textarea').first
+            # Meta AI uses a contenteditable div with role="textbox"
+            chat_input = page.get_by_role("textbox").first
             chat_input.wait_for(state="visible", timeout=15000)
             
             print(f"Typing prompt: {prompt}")
-            chat_input.fill(prompt)
+            chat_input.click()
+            page.keyboard.type(prompt)
             page.keyboard.press("Enter")
             
             print("Prompt submitted. Waiting for generation to complete...")

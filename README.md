@@ -8,7 +8,7 @@ This repository automates the process of generating videos using Meta AI (`https
 2. The payload includes:
    - `prompt`: The text to generate the video (e.g., "generate a video of a cat playing piano").
    - `webhook_url`: The URL of your n8n webhook where the result should be sent.
-   - `cookies_txt`: Your Netscape formatted cookies string (used to bypass login/captcha).
+   - `cookies_b64`: Your Netscape formatted cookies string encoded in Base64 (used to bypass login/captcha).
 3. GitHub Actions spins up a headless browser, injects the cookies, goes to `meta.ai`, types the prompt, and waits for the video.
 4. Once the video URL is found, it sends a POST request to your `webhook_url`.
 
@@ -35,7 +35,7 @@ Use the **HTTP Request** node in n8n with the following settings:
   "client_payload": {
     "prompt": "generate a video of a fast car",
     "webhook_url": "https://alisaadeng-n8n.hf.space/webhook-test/...",
-    "cookies_txt": "# Netscape HTTP Cookie File\n.meta.com\tTRUE\t/\tTRUE\t1792117789\tc_user\t123456789..."
+    "cookies_b64": "IyBOZXRzY2FwZSBIVFRQIENvb2tpZSBGaWxlCg=="
   }
 }
 ```

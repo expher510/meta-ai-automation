@@ -1,0 +1,58 @@
+[
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1780195649,
+    "name": "datr",
+    "value": "C1MuaWRgetvyl2KeW39cjDKl"
+  },
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1787319664,
+    "name": "ps_l",
+    "value": "1"
+  },
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1787319664,
+    "name": "ps_n",
+    "value": "1"
+  },
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1776744460,
+    "name": "rd_challenge",
+    "value": "Q_6hBQNdtEo1QlHOImRakfoaRB54i_0aLb-SiWPTp71yppHlZf6dDqnu-DRpbBJ7FF42z4E7oQ-mqDGwsmF2r1y2I8HlSQ"
+  },
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1777262862,
+    "name": "dpr",
+    "value": "1"
+  },
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1777271671,
+    "name": "wd",
+    "value": "1920x925"
+  },
+  {
+    "domain": ".meta.ai",
+    "path": "/",
+    "secure": true,
+    "expires": 1792216085,
+    "name": "ecto_1_sess",
+    "value": "0ac39887-7039-4687-b078-570a099be1a2.v1%3AEyqDDPGfAv5kyLzXtUciy8pcuaomTsm-an0nvyAgNq85Lnhqe9qvjVHNS7280NeexvWkxS5vrcnQNqghUV1s0F0B0OVG9B-FgADZrOn3xCpWIBta63KoG_kT9VgyQ_rxwsr_oyIyAP30AB37Uu4z9sMUUeDida6_iZgeFZN18PE7mJvLFt2IeXO812ZWQjJuZTi-Lx_-VjgZ2IUXhUUXIQeV0eRneAtOZZUNNg0J9LfdQ2oVbaJ6Hswe2A9_D_xi65gDT7D16Ab0ko2JQKAkH5ECgeTTi1eLQ8a5MySfx6fB9mxiR22HrWY4h6-afAfqilSTw0V15d5y5Xb-x8RVtirtuKQVC1sJeBTbLRch-qi84DHMYfhItvfbnUqthtCuHZgXOY4vB7UMLVpf99GWpzTOYww9xycAk19PUdFeJwzSvikx87dLDcMMJ7szDuMyK4eUMZ-j1kzT3nyxBOyiK6DmVgN48ANdRnRKl5O5csmj7rAG8rWd65jBAy5CJwLGUw%3AMXOjKouqwxEM_sua%3ALU4gqmlLbDkydjHFZDLTCQ.dktJZ-tJmXwuwQwhwFjBpfWUKprSNR9AGZB5eXyVcMs"
+  }
+]
