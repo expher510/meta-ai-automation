@@ -1,0 +1,73 @@
+name: Generate Meta AI Video
+
+on:
+  repository_dispatch:
+    types: [generate_video]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'The prompt to generate the video'
+        required: true
+        type: string
+      webhook_url:
+        description: 'n8n Webhook URL to send the result'
+        required: true
+        type: string
+      cookies_txt:
+        description: 'Netscape HTTP Cookie format string'
+        required: true
+        type: string
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Save Cookies to File (Workflow Dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # Use jq to safely read from the event payload file
+          jq -r '.inputs.cookies_txt' "$GITHUB_EVENT_PATH" > cookies.txt
+
+      - name: Save Cookies to File (Repository Dispatch)
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          # Use jq to safely extract cookies from client_payload
+          jq -r '.client_payload.cookies_txt' "$GITHUB_EVENT_PATH" > cookies.txt
+
+      - name: Run Playwright Script (Workflow Dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python meta_ai_bot.py \
+            --prompt "${{ github.event.inputs.prompt }}" \
+            --webhook "${{ github.event.inputs.webhook_url }}" \
+            --cookies cookies.txt
+
+      - name: Run Playwright Script (Repository Dispatch)
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          python meta_ai_bot.py \
+            --prompt "${{ github.event.client_payload.prompt }}" \
+            --webhook "${{ github.event.client_payload.webhook_url }}" \
+            --cookies cookies.txt
+
+      - name: Upload Error Screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshot
+          path: error_screenshot.png
+          if-no-files-found: ignore
