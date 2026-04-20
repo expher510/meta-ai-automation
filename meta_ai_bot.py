@@ -45,7 +45,6 @@ def parse_netscape_cookies(file_path_or_content):
             try:
                 expires = float(parts[4])
                 if expires > 0:
-                    # Some cookies have very large expiration dates which might fail in Playwright
                     cookie['expires'] = expires
             except ValueError:
                 pass
@@ -61,6 +60,11 @@ def run(prompt, webhook_url, cookies_input):
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
+
+        # Anti-detection
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined})
+        """)
         
         # Parse and load cookies
         print("Parsing cookies...")
@@ -79,13 +83,12 @@ def run(prompt, webhook_url, cookies_input):
             page.wait_for_load_state("networkidle")
         except Exception as e:
             print(f"Failed to navigate: {e}")
-            send_to_webhook(webhook_url, str(e), prompt, False)
+            send_to_webhook(webhook_url, [], prompt, False, str(e))
             browser.close()
             return
             
         try:
             print("Looking for the chat input box...")
-            # Meta AI uses a contenteditable div with role="textbox"
             chat_input = page.get_by_role("textbox").first
             chat_input.wait_for(state="visible", timeout=15000)
             
@@ -94,43 +97,48 @@ def run(prompt, webhook_url, cookies_input):
             page.keyboard.type(prompt)
             page.keyboard.press("Enter")
             
-            print("Prompt submitted. Waiting for generation to complete...")
-            # Videos usually take some time. We wait for a video element to appear.
-            # Meta AI might show a loading state first.
-            
-            # This logic waits for any <video> tag that gets added to the page.
-            # If the video is inside a specific container, update the selector.
-            video_locator = page.locator('video').last
-            
-            # We give it up to 3 minutes to generate
-            video_locator.wait_for(state="attached", timeout=180000)
-            
-            # Wait a few seconds for the src to fully populate
-            time.sleep(5)
-            
-            video_url = video_locator.get_attribute("src")
-            if video_url:
-                print(f"Success! Generated Video URL: {video_url}")
-                send_to_webhook(webhook_url, video_url, prompt, True)
+            print("Prompt submitted. Waiting for videos to generate...")
+
+            # انتظر أول فيديو يظهر
+            page.wait_for_selector('video', timeout=180000)
+
+            # استنى شوية عشان الـ 4 فيديوهات يكملوا
+            print("First video detected. Waiting for all 4 videos...")
+            time.sleep(10)
+
+            # اجمع كل الفيديوهات
+            video_elements = page.locator('video').all()
+            video_urls = []
+
+            for i, video in enumerate(video_elements):
+                src = video.get_attribute("src")
+                if src:
+                    video_urls.append(src)
+                    print(f"Video {i+1}: {src[:80]}...")
+
+            print(f"Total videos found: {len(video_urls)}")
+
+            if video_urls:
+                send_to_webhook(webhook_url, video_urls, prompt, True)
             else:
-                print("Video element found, but could not extract the 'src' attribute.")
-                send_to_webhook(webhook_url, "Video element found but no src attribute", prompt, False)
+                print("No video URLs found.")
+                page.screenshot(path="error_screenshot.png")
+                send_to_webhook(webhook_url, [], prompt, False, "No video URLs found")
                 
         except Exception as e:
             print(f"Error during automation: {e}")
-            # Try to grab a screenshot for debugging
             try:
                 page.screenshot(path="error_screenshot.png")
                 print("Saved error screenshot to error_screenshot.png")
             except:
                 pass
-            send_to_webhook(webhook_url, str(e), prompt, False)
+            send_to_webhook(webhook_url, [], prompt, False, str(e))
             
         finally:
             print("Closing browser...")
             browser.close()
 
-def send_to_webhook(webhook_url, result, prompt, success=True):
+def send_to_webhook(webhook_url, video_urls, prompt, success=True, error=None):
     if not webhook_url:
         print("No webhook URL provided. Skipping webhook.")
         return
@@ -138,7 +146,9 @@ def send_to_webhook(webhook_url, result, prompt, success=True):
     payload = {
         "success": success,
         "prompt": prompt,
-        "result": result
+        "video_urls": video_urls,
+        "video_count": len(video_urls),
+        "error": error
     }
     
     print(f"Sending webhook to {webhook_url}...")
