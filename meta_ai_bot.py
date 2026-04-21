@@ -192,11 +192,12 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
 
             print(f"Typing prompt: {prompt}")
             try:
-                chat_input.fill(prompt, force=True)
-            except Exception as e:
-                print(f"Fill failed, trying keyboard: {e}")
+                chat_input.focus()
                 chat_input.click(force=True)
-                page.keyboard.type(prompt)
+                page.keyboard.type(prompt, delay=10) # human-like typing to trigger React events
+                time.sleep(1)
+            except Exception as e:
+                print(f"Typing failed: {e}")
             
             page.keyboard.press("Enter")
             
