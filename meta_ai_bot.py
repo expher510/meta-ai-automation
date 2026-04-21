@@ -164,16 +164,8 @@ def run(
             # ----------------------------------------------------------------
             # Capture baseline element sets AFTER page is ready
             # ----------------------------------------------------------------
-            initial_video_srcs: set[str] = {
-                v.get_attribute("src") or ""
-                for v in page.locator("video").all()
-                if v.get_attribute("src")
-            }
-            initial_image_srcs: set[str] = {
-                img.get_attribute("src") or ""
-                for img in page.locator('img[src^="https://scontent"]').all()
-                if img.get_attribute("src")
-            }
+            initial_video_srcs: set[str] = set(page.evaluate("Array.from(document.querySelectorAll('video')).map(v => v.src).filter(Boolean)"))
+            initial_image_srcs: set[str] = set(page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)"))
             print(
                 f"[baseline] {len(initial_video_srcs)} videos, "
                 f"{len(initial_image_srcs)} images before generation."
@@ -321,10 +313,7 @@ def _wait_for_images(
     found = False
     for _ in range(60):
         page.wait_for_timeout(3_000)
-        current = [
-            img.get_attribute("src") or ""
-            for img in page.locator('img[src^="https://scontent"]').all()
-        ]
+        current = page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)")
         new_urls = _new_srcs(current, initial_srcs)
         if new_urls:
             found = True
@@ -332,10 +321,7 @@ def _wait_for_images(
 
     if not found:
         print("[images] Timeout — collecting whatever is available.")
-        current = [
-            img.get_attribute("src") or ""
-            for img in page.locator('img[src^="https://scontent"]').all()
-        ]
+        current = page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)")
         new_urls = _new_srcs(current, initial_srcs)
 
     new_urls = new_urls[:4]  # cap at 4
@@ -358,10 +344,7 @@ def _wait_for_video(
         page.wait_for_timeout(3_000)
 
         # Check for direct video appearance
-        current_videos = [
-            v.get_attribute("src") or ""
-            for v in page.locator("video").all()
-        ]
+        current_videos = page.evaluate("Array.from(document.querySelectorAll('video')).map(v => v.src).filter(Boolean)")
         new_vids = _new_srcs(current_videos, initial_video_srcs)
         if new_vids:
             print("[video] New video detected!")
@@ -370,23 +353,17 @@ def _wait_for_video(
 
         # Check for Animate button on a new image
         if not clicked_animate:
-            current_imgs = [
-                img.get_attribute("src") or ""
-                for img in page.locator('img[src^="https://scontent"]').all()
-            ]
+            current_imgs = page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)")
             if _new_srcs(current_imgs, initial_image_srcs):
                 animate_btn = page.locator(
                     'button[aria-label*="Animate"], button:has-text("Animate")'
                 ).last
                 if animate_btn.count() == 0:
-                    # Try hovering last new image to reveal button
+                    # Try hovering last image to reveal button
                     try:
-                        new_img_els = [
-                            img for img in page.locator('img[src^="https://scontent"]').all()
-                            if img.get_attribute("src") not in initial_image_srcs
-                        ]
-                        if new_img_els:
-                            new_img_els[-1].hover(force=True)
+                        imgs_locator = page.locator('img[src^="https://scontent"]')
+                        if imgs_locator.count() > 0:
+                            imgs_locator.last.hover(force=True)
                             page.wait_for_timeout(800)
                             animate_btn = page.locator(
                                 'button[aria-label*="Animate"], button:has-text("Animate")'
@@ -406,10 +383,7 @@ def _wait_for_video(
         print("[video] Timeout — collecting whatever is available.")
 
     page.wait_for_timeout(2_000)
-    current_videos = [
-        v.get_attribute("src") or ""
-        for v in page.locator("video").all()
-    ]
+    current_videos = page.evaluate("Array.from(document.querySelectorAll('video')).map(v => v.src).filter(Boolean)")
     new_vids = _new_srcs(current_videos, initial_video_srcs)[:4]
 
     if new_vids:
