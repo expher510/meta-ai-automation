@@ -45,7 +45,6 @@ def parse_netscape_cookies(file_path_or_content):
             try:
                 expires = float(parts[4])
                 if expires > 0:
-                    # Some cookies have very large expiration dates which might fail in Playwright
                     cookie['expires'] = expires
             except ValueError:
                 pass
@@ -61,6 +60,11 @@ def run(prompt, webhook_url, cookies_input, job_id=None):
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
+
+        # Anti-detection
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined})
+        """)
         
         # Parse and load cookies
         print("Parsing cookies...")
@@ -85,7 +89,6 @@ def run(prompt, webhook_url, cookies_input, job_id=None):
             
         try:
             print("Looking for the chat input box...")
-            # Meta AI uses a contenteditable div with role="textbox"
             chat_input = page.get_by_role("textbox").first
             chat_input.wait_for(state="visible", timeout=15000)
             
@@ -118,7 +121,6 @@ def run(prompt, webhook_url, cookies_input, job_id=None):
                 
         except Exception as e:
             print(f"Error during automation: {e}")
-            # Try to grab a screenshot for debugging
             try:
                 page.screenshot(path="error_screenshot.png")
                 print("Saved error screenshot to error_screenshot.png")
