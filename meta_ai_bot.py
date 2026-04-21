@@ -228,9 +228,12 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     print("Bottom Animate button not found, trying image hover...")
                     imgs = page.locator('img[src^="https://scontent"]').all()
                     if imgs:
-                        imgs[-1].hover()
-                        time.sleep(1)
-                        animate_btn = page.locator('button:has-text("Animate")').last
+                        try:
+                            imgs[-1].hover(force=True)
+                            time.sleep(1)
+                            animate_btn = page.locator('button:has-text("Animate")').last
+                        except Exception as hover_e:
+                            print(f"Hover failed: {hover_e}")
                         
                 if animate_btn.count() > 0:
                     print(f"Clicking Animate button (found {animate_btn.count()} matches)...")
