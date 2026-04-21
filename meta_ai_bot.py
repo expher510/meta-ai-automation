@@ -222,7 +222,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 imgs = page.locator('img[src^="https://scontent"]').all()
                 img_urls = [img.get_attribute("src") for img in imgs if img.get_attribute("src")]
                 # Return the new images (difference in count, max 4)
-                new_count = max(1, min(4, len(img_urls) - initial_image_count))
+                new_count = max(0, min(4, len(img_urls) - initial_image_count))
                 img_urls = img_urls[:new_count]
                 
                 if img_urls:
@@ -248,12 +248,12 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                         
                     # 2. Did an image appear that needs to be animated?
                     if not clicked_animate:
-                        animate_btn = page.locator('button:has-text("Animate")').last
-                        
-                        if animate_btn.count() == 0:
-                            # Try hovering the latest image to reveal the Animate button
-                            imgs = page.locator('img[src^="https://scontent"]').all()
-                            if imgs and len(imgs) > initial_image_count:
+                        imgs = page.locator('img[src^="https://scontent"]').all()
+                        if imgs and len(imgs) > initial_image_count:
+                            animate_btn = page.locator('button:has-text("Animate")').last
+                            
+                            if animate_btn.count() == 0:
+                                # Try hovering the latest image to reveal the Animate button
                                 try:
                                     imgs[-1].hover(force=True)
                                     time.sleep(1)
@@ -261,14 +261,14 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                                 except:
                                     pass
                                     
-                        if animate_btn.count() > 0:
-                            print(f"Found Animate button. Clicking it to generate video...")
-                            try:
-                                animate_btn.click(force=True)
-                                clicked_animate = True
-                                print("Clicked Animate! Waiting for video...")
-                            except Exception as click_e:
-                                print(f"Failed to click Animate: {click_e}")
+                            if animate_btn.count() > 0:
+                                print(f"Found Animate button on new image. Clicking it to generate video...")
+                                try:
+                                    animate_btn.click(force=True)
+                                    clicked_animate = True
+                                    print("Clicked Animate! Waiting for video...")
+                                except Exception as click_e:
+                                    print(f"Failed to click Animate: {click_e}")
                 
                 if not found_video:
                     print("Timeout waiting for video. Proceeding anyway...")
@@ -277,7 +277,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 video_elements = page.locator('video').all()
                 video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
                 
-                new_count = max(1, min(4, len(video_urls) - initial_video_count))
+                new_count = max(0, min(4, len(video_urls) - initial_video_count))
                 video_urls = video_urls[:new_count]
                 
                 if video_urls:
