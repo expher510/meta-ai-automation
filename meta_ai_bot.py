@@ -188,6 +188,10 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 file_input.set_input_files("temp_upload_img.jpg")
                 time.sleep(3) # wait for upload
             
+            # Count existing media to detect new generations
+            initial_video_count = page.locator('video').count()
+            initial_image_count = page.locator('img[src^="https://scontent"]').count()
+
             print(f"Typing prompt: {prompt}")
             try:
                 chat_input.fill(prompt, force=True)
@@ -202,12 +206,19 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             
             if action == "text_to_image":
                 print("Waiting for images to generate...")
-                page.wait_for_selector('img[src^="https://scontent"]', timeout=180000)
+                for _ in range(60):
+                    time.sleep(3)
+                    if page.locator('img[src^="https://scontent"]').count() > initial_image_count:
+                        break
+                else:
+                    print("Timeout waiting for new image. Proceeding anyway...")
+                    
                 time.sleep(5)
                 imgs = page.locator('img[src^="https://scontent"]').all()
                 img_urls = [img.get_attribute("src") for img in imgs if img.get_attribute("src")]
-                # Limit to latest 4 images to prevent payload bloat from history gallery
-                img_urls = img_urls[:4]
+                # Return the new images (difference in count, max 4)
+                new_count = max(1, min(4, len(img_urls) - initial_image_count))
+                img_urls = img_urls[:new_count]
                 
                 if img_urls:
                     print(f"Success! Found {len(img_urls)} new image(s)")
@@ -244,12 +255,22 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     page.screenshot(path="animate_btn_not_found.png")
                     raise Exception("Could not find Animate button")
                 
-                page.wait_for_selector('video', timeout=180000)
-                time.sleep(10)
+                # Update video count before animation starts just in case
+                initial_video_count = page.locator('video').count()
+                
+                for _ in range(60):
+                    time.sleep(3)
+                    if page.locator('video').count() > initial_video_count:
+                        break
+                else:
+                    print("Timeout waiting for animated video. Proceeding anyway...")
+                    
+                time.sleep(5)
                 video_elements = page.locator('video').all()
                 video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
-                # Limit to latest 4 videos
-                video_urls = video_urls[:4]
+                # Get the newly generated video (usually top 1)
+                new_count = max(1, min(4, len(video_urls) - initial_video_count))
+                video_urls = video_urls[:new_count]
                 
                 if video_urls:
                     print(f"Success! Found {len(video_urls)} new video(s)")
@@ -260,8 +281,14 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             else: # text_to_video or image_to_video
                 print("Waiting for videos to generate...")
                 try:
-                    page.wait_for_selector('video', timeout=180000)
-                    print("First video detected. Waiting for all 4 videos...")
+                    for _ in range(60):
+                        time.sleep(3)
+                        if page.locator('video').count() > initial_video_count:
+                            break
+                    else:
+                        print("Timeout waiting for video. Proceeding anyway...")
+                        
+                    print("New video detected. Waiting for all videos to finish...")
                     time.sleep(10)
                     
                     video_elements = page.locator('video').all()
@@ -271,8 +298,8 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                         if src:
                             video_urls.append(src)
                     
-                    # Limit to latest 4 videos
-                    video_urls = video_urls[:4]
+                    new_count = max(1, min(4, len(video_urls) - initial_video_count))
+                    video_urls = video_urls[:new_count]
                     print(f"Total new videos found: {len(video_urls)}")
                     
                     if video_urls:
