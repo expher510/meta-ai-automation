@@ -93,7 +93,10 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             context.add_cookies(cookies)
             print(f"Loaded {len(cookies)} cookies into the browser context.")
         else:
-            print("WARNING: No cookies parsed. You might be asked to log in, which will fail the automation.")
+            print("ERROR: No cookies parsed. Automation requires cookies to work.")
+            send_to_webhook(webhook_url, [], prompt, action, False, "No cookies parsed", job_id=job_id)
+            browser.close()
+            return
             
         page = context.new_page()
         
@@ -136,10 +139,13 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     mode_button.click()
                     # Try several ways to find the menu item
                     target = "Video" if is_video_mode else "Image"
-                    menu_item = page.get_by_text(target, exact=True).last
-                    menu_item = page.get_by_role("menuitem", name=target).first
+                    try:
+                        menu_item = page.get_by_role("menuitem", name=target).first
+                        menu_item.wait_for(state="visible", timeout=3000)
+                    except:
+                        menu_item = page.get_by_text(target, exact=True).last
+                        menu_item.wait_for(state="visible", timeout=3000)
                     
-                    menu_item.wait_for(state="visible", timeout=5000)
                     menu_item.click(timeout=10000)
                     print(f"Successfully clicked {target} mode.")
                 except Exception as e:
@@ -188,8 +194,10 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 time.sleep(5) # wait for upload, reduced from 8s
             
             # Count existing media to detect new generations
-            initial_video_count = page.locator('video').count()
-            initial_image_count = page.locator('img[src^="https://scontent"]').count()
+            print("Collecting initial media state...")
+            initial_video_srcs = {v.get_attribute("src") for v in page.locator('video').all() if v.get_attribute("src")}
+            initial_image_srcs = {img.get_attribute("src") for img in page.locator('img[src^="https://scontent"]').all() if img.get_attribute("src")}
+            print(f"Initial counts - Videos: {len(initial_video_srcs)}, Images: {len(initial_image_srcs)}")
 
             print(f"Typing prompt: {prompt}")
             try:
@@ -208,7 +216,8 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 print("Waiting for images to generate...")
                 for _ in range(60):
                     time.sleep(3)
-                    if page.locator('img[src^="https://scontent"]').count() > initial_image_count:
+                    current_images = {img.get_attribute("src") for img in page.locator('img[src^="https://scontent"]').all() if img.get_attribute("src")}
+                    if len(current_images - initial_image_srcs) > 0:
                         break
                 else:
                     print("Timeout waiting for new image. Proceeding anyway...")
@@ -216,13 +225,13 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 time.sleep(5)
                 imgs = page.locator('img[src^="https://scontent"]').all()
                 img_urls = [img.get_attribute("src") for img in imgs if img.get_attribute("src")]
-                # Return the new images (difference in count, max 4)
-                new_count = max(0, min(4, len(img_urls) - initial_image_count))
-                img_urls = img_urls[:new_count]
+                # Filter strictly by new URLs
+                new_img_urls = [u for u in img_urls if u not in initial_image_srcs]
+                new_img_urls = new_img_urls[:4] # limit to 4
                 
-                if img_urls:
-                    print(f"Success! Found {len(img_urls)} new image(s)")
-                    send_to_webhook(webhook_url, img_urls, prompt, action, True, job_id=job_id)
+                if new_img_urls:
+                    print(f"Success! Found {len(new_img_urls)} new image(s)")
+                    send_to_webhook(webhook_url, new_img_urls, prompt, action, True, job_id=job_id)
                 else:
                     raise Exception("No image URLs found")
                     
@@ -236,15 +245,16 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     time.sleep(3)
                     
                     # 1. Did a video appear directly?
-                    if page.locator('video').count() > initial_video_count:
+                    current_videos = {v.get_attribute("src") for v in page.locator('video').all() if v.get_attribute("src")}
+                    if len(current_videos - initial_video_srcs) > 0:
                         print("New video detected!")
                         found_video = True
                         break
                         
                     # 2. Did an image appear that needs to be animated?
                     if not clicked_animate:
-                        imgs = page.locator('img[src^="https://scontent"]').all()
-                        if imgs and len(imgs) > initial_image_count:
+                        current_images = {img.get_attribute("src") for img in page.locator('img[src^="https://scontent"]').all() if img.get_attribute("src")}
+                        if len(current_images - initial_image_srcs) > 0:
                             animate_btn = page.locator('button:has-text("Animate")').last
                             
                             if animate_btn.count() == 0:
@@ -272,12 +282,13 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 video_elements = page.locator('video').all()
                 video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
                 
-                new_count = max(0, min(4, len(video_urls) - initial_video_count))
-                video_urls = video_urls[:new_count]
+                # Filter strictly by new URLs
+                new_video_urls = [u for u in video_urls if u not in initial_video_srcs]
+                new_video_urls = new_video_urls[:4]
                 
-                if video_urls:
-                    print(f"Success! Found {len(video_urls)} new video(s)")
-                    send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
+                if new_video_urls:
+                    print(f"Success! Found {len(new_video_urls)} new video(s)")
+                    send_to_webhook(webhook_url, new_video_urls, prompt, action, True, job_id=job_id)
                 else:
                     raise Exception("No video URLs found after processing")
                 
