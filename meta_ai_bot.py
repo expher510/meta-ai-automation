@@ -157,16 +157,16 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             except:
                 pass
 
-            # Aspect ratio selection (only in image mode usually)
-            if not is_video_mode and aspect_ratio and aspect_ratio != "1:1":
+            # Aspect ratio selection
+            if aspect_ratio and aspect_ratio != "1:1":
                 print(f"Setting aspect ratio to {aspect_ratio}...")
                 try:
                     # Find any button that looks like an aspect ratio (1:1, 9:16, 16:9)
                     ratio_btn = page.locator('button, div[role="button"]').filter(has_text=re.compile(r"1:1|9:16|16:9")).last
                     if ratio_btn.count() > 0:
-                        ratio_btn.click(timeout=5000)
+                        ratio_btn.click(force=True, timeout=5000)
                         time.sleep(1)
-                        page.get_by_text(aspect_ratio, exact=True).last.click(timeout=5000)
+                        page.get_by_text(aspect_ratio, exact=True).last.click(force=True, timeout=5000)
                         time.sleep(1)
                     else:
                         print("Aspect ratio dropdown not found. It might be unavailable.")
@@ -176,17 +176,22 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             # Handle Image Upload if needed
             if action == "image_to_video":
                 if not image_url:
-                    raise Exception("image_url must be provided for image_to_video action")
-                print(f"Downloading image from {image_url}...")
-                img_data = requests.get(image_url).content
-                with open("temp_upload_img.jpg", "wb") as f:
-                    f.write(img_data)
+                    raise Exception("image_url is required for image_to_video action")
+                if image_url.startswith("http"):
+                    print(f"Downloading image from {image_url}...")
+                    img_data = requests.get(image_url).content
+                    with open("temp_upload_img.jpg", "wb") as f:
+                        f.write(img_data)
+                    upload_path = "temp_upload_img.jpg"
+                else:
+                    upload_path = image_url
+                    
                 print("Uploading image...")
                 file_input = page.locator('input[type="file"]').first
                 if not file_input:
                     raise Exception("Could not find file input element")
-                file_input.set_input_files("temp_upload_img.jpg")
-                time.sleep(3) # wait for upload
+                file_input.set_input_files(upload_path)
+                time.sleep(8) # wait for upload
             
             # Count existing media to detect new generations
             initial_video_count = page.locator('video').count()
@@ -226,49 +231,52 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 else:
                     raise Exception("No image URLs found")
                     
-            elif action == "animate_generation":
-                print("Waiting for image to generate before animating...")
-                page.wait_for_selector('img[src^="https://scontent"]', timeout=180000)
-                time.sleep(10) # Wait for image to settle and buttons to appear
+            elif action in ["animate_generation", "image_to_video", "text_to_video"]:
+                print("Waiting for generation to finish...")
                 
-                print("Looking for 'Animate' button...")
-                # Try bottom bar Animate button first
-                animate_btn = page.locator('button:has-text("Animate")').last
-                
-                if animate_btn.count() == 0:
-                    print("Bottom Animate button not found, trying image hover...")
-                    imgs = page.locator('img[src^="https://scontent"]').all()
-                    if imgs:
-                        try:
-                            imgs[-1].hover(force=True)
-                            time.sleep(1)
-                            animate_btn = page.locator('button:has-text("Animate")').last
-                        except Exception as hover_e:
-                            print(f"Hover failed: {hover_e}")
-                        
-                if animate_btn.count() > 0:
-                    print(f"Clicking Animate button (found {animate_btn.count()} matches)...")
-                    animate_btn.click(force=True)
-                    print("Clicked Animate! Waiting for video...")
-                else:
-                    print("Could not find Animate button, taking debug screenshot...")
-                    page.screenshot(path="animate_btn_not_found.png")
-                    raise Exception("Could not find Animate button")
-                
-                # Update video count before animation starts just in case
-                initial_video_count = page.locator('video').count()
+                clicked_animate = False
+                found_video = False
                 
                 for _ in range(60):
                     time.sleep(3)
+                    
+                    # 1. Did a video appear directly?
                     if page.locator('video').count() > initial_video_count:
+                        print("New video detected!")
+                        found_video = True
                         break
-                else:
-                    print("Timeout waiting for animated video. Proceeding anyway...")
+                        
+                    # 2. Did an image appear that needs to be animated?
+                    if not clicked_animate:
+                        animate_btn = page.locator('button:has-text("Animate")').last
+                        
+                        if animate_btn.count() == 0:
+                            # Try hovering the latest image to reveal the Animate button
+                            imgs = page.locator('img[src^="https://scontent"]').all()
+                            if imgs and len(imgs) > initial_image_count:
+                                try:
+                                    imgs[-1].hover(force=True)
+                                    time.sleep(1)
+                                    animate_btn = page.locator('button:has-text("Animate")').last
+                                except:
+                                    pass
+                                    
+                        if animate_btn.count() > 0:
+                            print(f"Found Animate button. Clicking it to generate video...")
+                            try:
+                                animate_btn.click(force=True)
+                                clicked_animate = True
+                                print("Clicked Animate! Waiting for video...")
+                            except Exception as click_e:
+                                print(f"Failed to click Animate: {click_e}")
+                
+                if not found_video:
+                    print("Timeout waiting for video. Proceeding anyway...")
                     
                 time.sleep(5)
                 video_elements = page.locator('video').all()
                 video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
-                # Get the newly generated video (usually top 1)
+                
                 new_count = max(1, min(4, len(video_urls) - initial_video_count))
                 video_urls = video_urls[:new_count]
                 
@@ -276,59 +284,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     print(f"Success! Found {len(video_urls)} new video(s)")
                     send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
                 else:
-                    raise Exception("No video URLs found after animating")
-
-            else: # text_to_video or image_to_video
-                print("Waiting for videos to generate...")
-                try:
-                    for _ in range(60):
-                        time.sleep(3)
-                        if page.locator('video').count() > initial_video_count:
-                            break
-                    else:
-                        print("Timeout waiting for video. Proceeding anyway...")
-                        
-                    print("New video detected. Waiting for all videos to finish...")
-                    time.sleep(10)
-                    
-                    video_elements = page.locator('video').all()
-                    video_urls = []
-                    for video in video_elements:
-                        src = video.get_attribute("src")
-                        if src:
-                            video_urls.append(src)
-                    
-                    new_count = max(1, min(4, len(video_urls) - initial_video_count))
-                    video_urls = video_urls[:new_count]
-                    print(f"Total new videos found: {len(video_urls)}")
-                    
-                    if video_urls:
-                        send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
-                        return
-                except Exception as inner_e:
-                    print(f"Video element didn't appear naturally. Checking for 'Animate' button fallback...")
-                
-                try:
-                    animate_btn = page.get_by_role("button", name="Animate").first
-                    if animate_btn.count() > 0:
-                        animate_btn.click()
-                        print("Clicked Animate fallback. Waiting for video...")
-                        page.wait_for_selector('video', timeout=180000)
-                        time.sleep(10)
-                        video_elements = page.locator('video').all()
-                        video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")][:4]
-                        if video_urls:
-                            send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
-                            return
-                except:
-                    pass
-                    
-                print("No video URLs found.")
-                try:
-                    page.screenshot(path="error_screenshot.png")
-                except:
-                    pass
-                send_to_webhook(webhook_url, [], prompt, action, False, "No video URLs found", job_id=job_id)
+                    raise Exception("No video URLs found after processing")
                 
         except Exception as e:
             print(f"Error during automation: {e}")
