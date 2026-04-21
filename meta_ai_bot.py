@@ -230,7 +230,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 clicked_animate = False
                 found_video = False
                 
-                for _ in range(60):
+                for _ in range(120): # Increased from 60 to 120 (6 minutes)
                     time.sleep(3)
                     
                     # 1. Did a video appear directly?
