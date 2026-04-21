@@ -3,35 +3,38 @@ name: Meta AI Automation
 on:
   repository_dispatch:
     types: [generate_video]
+
   workflow_dispatch:
     inputs:
       prompt:
-        description: 'The prompt to generate the video'
+        description: 'Generation prompt'
         required: true
         type: string
       webhook_url:
-        description: 'n8n Webhook URL to send the result'
+        description: 'Webhook URL to send result'
         required: true
         type: string
       cookies_b64:
-        description: 'Base64 encoded Netscape HTTP Cookie string'
+        description: 'Base64-encoded Netscape cookie string'
         required: true
         type: string
-      job_id:                          
-        description: 'Job ID to track the request'
+      job_id:
+        description: 'Job ID for tracking'
         required: false
+        default: ''
         type: string
       action:
-        description: 'Action to perform (text_to_video, text_to_image, animate_generation, image_to_video)'
+        description: 'Action (text_to_video | text_to_image | animate_generation | image_to_video)'
         required: false
         default: 'text_to_video'
         type: string
       image_url:
-        description: 'Image URL for image_to_video action'
+        description: 'Image URL (required for image_to_video only)'
         required: false
+        default: ''
         type: string
       aspect_ratio:
-        description: 'Aspect ratio for image generation (1:1, 9:16, 16:9)'
+        description: 'Aspect ratio (1:1 | 9:16 | 16:9)'
         required: false
         default: '1:1'
         type: string
@@ -39,81 +42,104 @@ on:
 jobs:
   run-automation:
     runs-on: ubuntu-latest
+    timeout-minutes: 15        # hard cap — prevents runaway jobs billing
+
     steps:
+      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # -----------------------------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'     # 3.11 > 3.10 for performance & type union syntax
 
-      - name: Cache Playwright Browsers
+      # -----------------------------------------------------------------------
+      # Cache key includes the Playwright version so a version bump auto-busts
+      # the cache instead of silently reusing stale browser binaries.
+      - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}-v1
           restore-keys: |
             ${{ runner.os }}-playwright-
 
-      - name: Install dependencies
+      # -----------------------------------------------------------------------
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          playwright install --with-deps chromium
 
-      - name: Save Cookies to File (Workflow Dispatch)
+      # Install only Chromium (not Firefox/WebKit) to keep the step fast.
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+
+      # -----------------------------------------------------------------------
+      # Decode cookies once; both dispatch paths share the same file.
+      - name: Decode cookies (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
         run: |
-          jq -r '.inputs.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
+          echo "${{ github.event.inputs.cookies_b64 }}" | base64 -d > cookies.txt
 
-      - name: Save Cookies to File (Repository Dispatch)
+      - name: Decode cookies (repository_dispatch)
         if: github.event_name == 'repository_dispatch'
         run: |
-          jq -r '.client_payload.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
+          echo "${{ github.event.client_payload.cookies_b64 }}" | base64 -d > cookies.txt
 
-      - name: Run Playwright Script (Workflow Dispatch)
+      # -----------------------------------------------------------------------
+      # Unified run step — reads env vars so the shell command stays clean and
+      # avoids shell-injection from user-supplied $PROMPT.
+      - name: Run automation (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
         env:
-          PROMPT: ${{ github.event.inputs.prompt }}
-          WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
-          JOB_ID: ${{ github.event.inputs.job_id }}
-          ACTION: ${{ github.event.inputs.action }}
-          IMAGE_URL: ${{ github.event.inputs.image_url }}
-          ASPECT_RATIO: ${{ github.event.inputs.aspect_ratio }}
+          PROMPT:        ${{ github.event.inputs.prompt }}
+          WEBHOOK_URL:   ${{ github.event.inputs.webhook_url }}
+          JOB_ID:        ${{ github.event.inputs.job_id }}
+          ACTION:        ${{ github.event.inputs.action }}
+          IMAGE_URL:     ${{ github.event.inputs.image_url }}
+          ASPECT_RATIO:  ${{ github.event.inputs.aspect_ratio }}
         run: |
           python meta_ai_bot.py \
-            --prompt "$PROMPT" \
-            --webhook "$WEBHOOK_URL" \
-            --cookies cookies.txt \
-            --job-id "$JOB_ID" \
-            --action "$ACTION" \
-            --image-url "$IMAGE_URL" \
+            --prompt       "$PROMPT"       \
+            --webhook      "$WEBHOOK_URL"  \
+            --cookies      cookies.txt     \
+            --job-id       "$JOB_ID"       \
+            --action       "$ACTION"       \
+            --image-url    "$IMAGE_URL"    \
             --aspect-ratio "$ASPECT_RATIO"
 
-      - name: Run Playwright Script (Repository Dispatch)
+      - name: Run automation (repository_dispatch)
         if: github.event_name == 'repository_dispatch'
         env:
-          PROMPT: ${{ github.event.client_payload.prompt }}
-          WEBHOOK_URL: ${{ github.event.client_payload.webhook_url }}
-          JOB_ID: ${{ github.event.client_payload.job_id }}
-          ACTION: ${{ github.event.client_payload.action }}
-          IMAGE_URL: ${{ github.event.client_payload.image_url }}
-          ASPECT_RATIO: ${{ github.event.client_payload.aspect_ratio }}
+          PROMPT:        ${{ github.event.client_payload.prompt }}
+          WEBHOOK_URL:   ${{ github.event.client_payload.webhook_url }}
+          JOB_ID:        ${{ github.event.client_payload.job_id }}
+          ACTION:        ${{ github.event.client_payload.action }}
+          IMAGE_URL:     ${{ github.event.client_payload.image_url }}
+          ASPECT_RATIO:  ${{ github.event.client_payload.aspect_ratio }}
         run: |
           python meta_ai_bot.py \
-            --prompt "$PROMPT" \
-            --webhook "$WEBHOOK_URL" \
-            --cookies cookies.txt \
-            --job-id "$JOB_ID" \
-            --action "$ACTION" \
-            --image-url "$IMAGE_URL" \
+            --prompt       "$PROMPT"       \
+            --webhook      "$WEBHOOK_URL"  \
+            --cookies      cookies.txt     \
+            --job-id       "$JOB_ID"       \
+            --action       "$ACTION"       \
+            --image-url    "$IMAGE_URL"    \
             --aspect-ratio "$ASPECT_RATIO"
 
-      - name: Upload Error Screenshot
+      # -----------------------------------------------------------------------
+      # Always upload any error screenshot so failures can be diagnosed.
+      - name: Upload error screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: error-screenshot
           path: error_screenshot.png
           if-no-files-found: ignore
+
+      # Security: delete the decoded cookie file after use.
+      - name: Remove cookie file
+        if: always()
+        run: rm -f cookies.txt
