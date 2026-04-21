@@ -21,10 +21,6 @@ on:
         description: 'Job ID to track the request'
         required: false
         type: string
-      job_id:                          
-        description: 'Job ID to track the request'
-        required: false
-        type: string
 
 jobs:
   run-automation:

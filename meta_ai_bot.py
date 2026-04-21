@@ -97,27 +97,35 @@ def run(prompt, webhook_url, cookies_input, job_id=None):
             page.keyboard.type(prompt)
             page.keyboard.press("Enter")
             
-            print("Prompt submitted. Waiting for generation to complete...")
-            # Videos usually take some time. We wait for a video element to appear.
-            # Meta AI might show a loading state first.
+            print("Prompt submitted. Waiting for videos to generate...")
             
-            # This logic waits for any <video> tag that gets added to the page.
-            # If the video is inside a specific container, update the selector.
-            video_locator = page.locator('video').last
+            # Wait for the first video to appear
+            page.wait_for_selector('video', timeout=180000)
             
-            # We give it up to 3 minutes to generate
-            video_locator.wait_for(state="attached", timeout=180000)
+            # Wait a bit for all 4 videos to complete
+            print("First video detected. Waiting for all 4 videos...")
+            time.sleep(10)
             
-            # Wait a few seconds for the src to fully populate
-            time.sleep(5)
+            # Collect all videos
+            video_elements = page.locator('video').all()
+            video_urls = []
+            for i, video in enumerate(video_elements):
+                src = video.get_attribute("src")
+                if src:
+                    video_urls.append(src)
+                    print(f"Video {i+1}: {src[:80]}...")
+                    
+            print(f"Total videos found: {len(video_urls)}")
             
-            video_url = video_locator.get_attribute("src")
-            if video_url:
-                print(f"Success! Generated Video URL: {video_url}")
-                send_to_webhook(webhook_url, [video_url], prompt, True, job_id=job_id)
+            if video_urls:
+                send_to_webhook(webhook_url, video_urls, prompt, True, job_id=job_id)
             else:
-                print("Video element found, but could not extract the 'src' attribute.")
-                send_to_webhook(webhook_url, [], prompt, False, "Video element found but no src attribute", job_id=job_id)
+                print("No video URLs found.")
+                try:
+                    page.screenshot(path="error_screenshot.png")
+                except:
+                    pass
+                send_to_webhook(webhook_url, [], prompt, False, "No video URLs found", job_id=job_id)
                 
         except Exception as e:
             print(f"Error during automation: {e}")
