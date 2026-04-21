@@ -94,7 +94,8 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
         print("Navigating to https://meta.ai/create ...")
         try:
             page.goto("https://meta.ai/create", timeout=60000)
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("domcontentloaded")
+            time.sleep(5) # Wait for UI to stabilize
         except Exception as e:
             print(f"Failed to navigate: {e}")
             send_to_webhook(webhook_url, [], prompt, action, False, str(e), job_id=job_id)
@@ -110,29 +111,36 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             # Wait for UI to settle
             time.sleep(3)
             
-            # Check current placeholder
+            # Check current placeholder to see if we need to switch
             placeholder_text = "Describe your animation" if is_video_mode else "Describe your image"
-            chat_input_by_ph = page.get_by_placeholder(re.compile(placeholder_text, re.IGNORECASE)).first
             
-            if chat_input_by_ph.count() == 0:
-                print("Switching mode via UI dropdown...")
-                try:
-                    if is_video_mode:
-                        # Find the Image dropdown and click it
-                        page.get_by_text("Image", exact=True).last.click(timeout=5000)
-                        time.sleep(1)
-                        page.get_by_text("Video", exact=True).last.click(timeout=5000)
-                    else:
-                        page.get_by_text("Video", exact=True).last.click(timeout=5000)
-                        time.sleep(1)
-                        page.get_by_text("Image", exact=True).last.click(timeout=5000)
-                    time.sleep(2)
-                except Exception as e:
-                    print(f"Could not switch mode cleanly, trying to proceed anyway: {e}")
+            # Find the mode toggle button (it usually shows 'Image' or 'Video')
+            mode_button = page.locator('button:has-text("Image"), button:has-text("Video")').last
+            
+            current_mode = "Video" if "animation" in (page.get_by_role("textbox").first.get_attribute("placeholder") or "").lower() else "Image"
+            # Alternative check if role textbox fails
+            try:
+                placeholder = page.locator('textarea[data-testid="composer-input"]').get_attribute("placeholder")
+                current_mode = "Video" if "animation" in (placeholder or "").lower() else "Image"
+            except:
+                pass
 
-            # Grab textbox
-            chat_input = page.get_by_role("textbox").first
-            chat_input.wait_for(state="visible", timeout=15000)
+            if (is_video_mode and current_mode == "Image") or (not is_video_mode and current_mode == "Video"):
+                print(f"Switching mode to {'Video' if is_video_mode else 'Image'}...")
+                mode_button.click()
+                time.sleep(1)
+                page.get_by_role("menuitem", name="Video" if is_video_mode else "Image").click()
+                time.sleep(2)
+
+            # Grab textbox using data-testid which is more reliable
+            chat_input = page.locator('textarea[data-testid="composer-input"]').first
+            chat_input.wait_for(state="attached", timeout=15000)
+            
+            # Sometimes it's hidden but interactive, or becomes visible after a click
+            try:
+                chat_input.click(force=True)
+            except:
+                pass
 
             # Aspect ratio selection (only in image mode usually)
             if not is_video_mode and aspect_ratio and aspect_ratio != "1:1":
@@ -166,9 +174,8 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 time.sleep(3) # wait for upload
             
             print(f"Typing prompt: {prompt}")
-            chat_input.click()
-            page.keyboard.type(prompt)
-            page.keyboard.press("Enter")
+            chat_input.fill(prompt)
+            chat_input.press("Enter")
             
             print(f"Prompt submitted. Executing action: {action}")
             
@@ -187,23 +194,27 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             elif action == "animate_generation":
                 print("Waiting for image to generate before animating...")
                 page.wait_for_selector('img[src^="https://scontent"]', timeout=180000)
-                time.sleep(5)
+                time.sleep(10) # Wait for image to settle and buttons to appear
                 
                 print("Looking for 'Animate' button...")
-                animate_btn = page.get_by_text("Animate", exact=False).first
+                # Try bottom bar Animate button first
+                animate_btn = page.locator('button:has-text("Animate")').last
+                
                 if animate_btn.count() == 0:
-                    animate_btn = page.get_by_role("button", name="Animate").first
-                if animate_btn.count() == 0:
+                    print("Bottom Animate button not found, trying image hover...")
                     imgs = page.locator('img[src^="https://scontent"]').all()
                     if imgs:
-                        imgs[-1].click()
-                        time.sleep(2)
-                        animate_btn = page.get_by_role("button", name="Animate").first
+                        imgs[-1].hover()
+                        time.sleep(1)
+                        animate_btn = page.locator('button:has-text("Animate")').last
                         
                 if animate_btn.count() > 0:
-                    animate_btn.click()
+                    print(f"Clicking Animate button (found {animate_btn.count()} matches)...")
+                    animate_btn.click(force=True)
                     print("Clicked Animate! Waiting for video...")
                 else:
+                    print("Could not find Animate button, taking debug screenshot...")
+                    page.screenshot(path="animate_btn_not_found.png")
                     raise Exception("Could not find Animate button")
                 
                 page.wait_for_selector('video', timeout=180000)
