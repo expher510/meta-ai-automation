@@ -21,6 +21,7 @@ on:
         description: 'Job ID to track the request'
         required: false
         type: string
+<<<<<<< HEAD
       action:
         description: 'Action to perform (text_to_video, text_to_image, animate_generation, image_to_video)'
         required: false
@@ -35,6 +36,12 @@ on:
         required: false
         default: '1:1'
         type: string
+=======
+      job_id:                          
+        description: 'Job ID to track the request'
+        required: false
+        type: string
+>>>>>>> parent of 549a0f6 (refine the code)
 
 jobs:
   run-automation:

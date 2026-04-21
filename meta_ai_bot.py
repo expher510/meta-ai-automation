@@ -207,6 +207,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             
             page.keyboard.press("Enter")
             
+<<<<<<< HEAD
             print(f"Prompt submitted. Executing action: {action}")
             
             if action == "text_to_image":
@@ -285,6 +286,29 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
                 else:
                     raise Exception("No video URLs found after processing")
+=======
+            print("Prompt submitted. Waiting for generation to complete...")
+            # Videos usually take some time. We wait for a video element to appear.
+            # Meta AI might show a loading state first.
+            
+            # This logic waits for any <video> tag that gets added to the page.
+            # If the video is inside a specific container, update the selector.
+            video_locator = page.locator('video').last
+            
+            # We give it up to 3 minutes to generate
+            video_locator.wait_for(state="attached", timeout=180000)
+            
+            # Wait a few seconds for the src to fully populate
+            time.sleep(5)
+            
+            video_url = video_locator.get_attribute("src")
+            if video_url:
+                print(f"Success! Generated Video URL: {video_url}")
+                send_to_webhook(webhook_url, [video_url], prompt, True, job_id=job_id)
+            else:
+                print("Video element found, but could not extract the 'src' attribute.")
+                send_to_webhook(webhook_url, [], prompt, False, "Video element found but no src attribute", job_id=job_id)
+>>>>>>> parent of 549a0f6 (refine the code)
                 
         except Exception as e:
             print(f"Error during automation: {e}")
