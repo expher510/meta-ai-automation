@@ -1,138 +1,252 @@
-# Meta AI Automation (Video & Image Generation)
+# 🎬 Meta AI Video Generation API
 
-This repository automates the process of generating images and videos using Meta AI (`https://meta.ai/`) via Playwright and GitHub Actions. It is designed to be triggered by an `n8n` workflow and will send the result back to an `n8n` webhook.
+A fully working **Video Generation API** built on top of Meta AI, powered by Playwright browser automation, GitHub Actions, n8n workflows, and Redis — no dedicated server required.
 
-## Supported Actions
+Send a prompt → get back 4 AI-generated videos. That's it.
 
-You can pass an `action` parameter to control exactly what the bot does:
+---
 
-1. `text_to_video` (Default): Generates an animated video directly from your prompt (extracts up to 4 video variations).
-2. `text_to_image`: Generates an image from your prompt and returns the image URLs.
-3. `animate_generation`: Generates an image first, clicks the "Animate" button on the image, and returns the video URL.
-4. `image_to_video`: Uploads a specific image from a URL you provide, and asks Meta AI to animate/edit it into a video.
+## 🏗️ Architecture Overview
 
-## How to trigger from n8n
+```
+Client (POST /video-genrate)
+        │
+        ▼
+┌─────────────────────────────────────────────────────────┐
+│  n8n Workflow                                           │
+│                                                         │
+│  FLOW 1 — Cookie Setup (one-time)                       │
+│  POST /set-cookies                                      │
+│    → Encode Cookies (JS)                                │
+│    → Redis SET  key: meta_cookies_b64                   │
+│                                                         │
+│  FLOW 2 — Video Generation (main)                       │
+│  POST /video-genrate                                    │
+│    → Generate Job ID (UUID)                             │
+│    → Redis GET  key: meta_cookies_b64                   │
+│    → GitHub Actions trigger (repository_dispatch)       │
+│    → Respond 202 { job_id, message }   ◄── immediate   │
+│                                                         │
+│  FLOW 3 — Receive Result (callback)                     │
+│  POST /received-video  ◄── called by GitHub Action      │
+│    → If success == true                                 │
+│    → Redis SET  key: job_id → JSON(body)                │
+└─────────────────────────────────────────────────────────┘
+        │
+        ▼
+GitHub Actions (ubuntu-latest)
+    → Install Python + Playwright
+    → Decode cookies from Redis
+    → Open meta.ai headlessly
+    → Type prompt & submit
+    → Wait for 4 videos
+    → POST results back to /received-video
+```
 
-Use the **HTTP Request** node in n8n with the following settings:
+---
 
-- **Method**: `POST`
-- **URL**: `https://api.github.com/repos/<YOUR_GITHUB_USERNAME>/<YOUR_REPOSITORY_NAME>/dispatches`
-- **Authentication**: Header Auth (Personal Access Token)
-- **Headers**:
-  - `Accept`: `application/vnd.github.v3+json`
-- **Body Parameters**: JSON
+## ✨ Features
 
-### 1. Generating a Video (text_to_video)
+- 🤖 **Headless browser automation** — Playwright controls Meta AI like a real user
+- ☁️ **Serverless execution** — Runs entirely on GitHub Actions (free tier)
+- ⚡ **Async by design** — API responds immediately with `job_id`, generation runs in background
+- 🔗 **Webhook callback** — Results sent back to n8n automatically when ready
+- 🗄️ **Redis storage** — Cookies and video results stored by key for retrieval
+- 🍪 **Cookie-based auth** — Supports Netscape cookie format, auto-filtered for `meta.ai` domain
+- 🧩 **Job tracking** — Every request gets a unique UUID `job_id`
+
+---
+
+## 📁 Project Structure
+
+```
+├── meta_ai_bot.py               # Playwright automation script
+├── requirements.txt             # Python dependencies
+├── .github/
+│   └── workflows/
+│       └── generate_video.yml  # GitHub Actions workflow
+└── README.md
+```
+
+---
+
+## 🚀 Setup
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+```
+
+### 2. Add GitHub Token to n8n
+
+In your n8n HTTP Bearer credential, add a GitHub Personal Access Token with `repo` scope — used to trigger `repository_dispatch`.
+
+### 3. Set up Redis
+
+Any Redis instance works (local, Railway, Upstash, etc.). Add the connection in n8n under **Credentials → Redis**.
+
+### 4. Import the n8n Workflow
+
+Import the workflow JSON into n8n. It contains 3 flows:
+
+| Flow | Endpoint | Purpose |
+|------|----------|---------|
+| Cookie Setup | `POST /set-cookies` | One-time cookie upload |
+| Video Generate | `POST /video-genrate` | Trigger generation |
+| Receive Result | `POST /received-video` | GitHub Action callback |
+
+---
+
+## 🍪 Flow 1 — Set Cookies (One-Time Setup)
+
+Before generating videos, upload your Meta AI cookies once. They get stored in Redis and reused for every request.
+
+**Endpoint:** `POST /set-cookies`
+
 ```json
 {
-  "event_type": "generate_video",
-  "client_payload": {
-    "prompt": "generate a video of a fast car",
-    "webhook_url": "YOUR_N8N_WEBHOOK_URL",
-    "job_id": "123",
-    "cookies_b64": "IyBOZXRzY2FwZ...",
-    "action": "text_to_video"
-  }
+  "cookies_txt": "# Netscape HTTP Cookie File\n.meta.ai\tTRUE\t/\tTRUE\t..."
 }
 ```
 
-### 2. Generating an Image (text_to_image)
-*💡 Tip for Aspect Ratios: Meta AI understands text commands for dimensions. You can control the aspect ratio by simply adding it to the end of your prompt.*
+The workflow will:
+1. Parse the Netscape cookie file
+2. Filter only `meta.ai` domain cookies
+3. Convert to base64
+4. Store in Redis under key `meta_cookies_b64`
+
+---
+
+## 🎬 Flow 2 — Generate Video
+
+**Endpoint:** `POST /video-genrate`
+
 ```json
 {
-  "event_type": "generate_video",
-  "client_payload": {
-    "prompt": "a futuristic city",
-    "webhook_url": "YOUR_N8N_WEBHOOK_URL",
-    "job_id": "123",
-    "cookies_b64": "IyBOZXRzY2FwZ...",
-    "action": "text_to_image",
-    "aspect_ratio": "16:9"
-  }
+  "prompt": "a magical forest with glowing trees at night"
 }
 ```
 
-### 3. Generate Image & Animate it (animate_generation)
-*💡 Tip: Use this if you want to ensure the video retains a specific aspect ratio or high-quality composition. You ask for a 16:9 image, then the script automatically animates it!*
+> ⚠️ **Important — Prompt Formatting:**
+> The prompt is automatically wrapped before being sent to Meta AI:
+> ```
+> generate video about [a magical forest with glowing trees at night]
+> ```
+> This prefix **`generate video about`** is required for Meta AI to correctly understand the generation intent. The workflow adds it automatically — do **not** include it in your request.
+
+**Response (202 Accepted):**
+
 ```json
 {
-  "event_type": "generate_video",
-  "client_payload": {
-    "prompt": "a cute cat in space",
-    "webhook_url": "YOUR_N8N_WEBHOOK_URL",
-    "job_id": "123",
-    "cookies_b64": "IyBOZXRzY2FwZ...",
-    "action": "animate_generation",
-    "aspect_ratio": "9:16"
-  }
-}
-```
-
-### 4. Upload an Image to Video (image_to_video)
-```json
-{
-  "event_type": "generate_video",
-  "client_payload": {
-    "prompt": "Animate this image",
-    "webhook_url": "YOUR_N8N_WEBHOOK_URL",
-    "job_id": "123",
-    "cookies_b64": "IyBOZXRzY2FwZ...",
-    "action": "image_to_video",
-    "image_url": "https://example.com/your-image.jpg"
-  }
-}
-```
-
-## Receiving the Webhook in n8n
-
-Create a **Webhook** node in n8n to receive the result. The payload sent by the script is backwards-compatible but adds new useful fields.
-
-**For Videos:**
-```json
-{
-  "job_id": "123",
   "success": true,
-  "prompt": "generate a video of a fast car",
-  "media_type": "video",
+  "job_id": "d70e01fd-22d4-4b9e-abe1-c30c7144c67d",
+  "message": "Job queued successfully"
+}
+```
+
+The response is immediate. Actual generation takes ~2–3 minutes on GitHub Actions.
+
+---
+
+## 📬 Flow 3 — Receive Result (Callback)
+
+When GitHub Actions finishes, it sends results back automatically to `/received-video` (internal endpoint, called by the Python script).
+
+**Payload received:**
+
+```json
+{
+  "job_id": "d70e01fd-22d4-4b9e-abe1-c30c7144c67d",
+  "success": true,
+  "prompt": "generate video about [a magical forest with glowing trees at night]",
   "video_urls": [
-    "https://scontent...mp4",
-    "https://scontent...mp4"
+    "https://scontent-ord5-1.xx.fbcdn.net/...video1.mp4",
+    "https://scontent-ord5-2.xx.fbcdn.net/...video2.mp4",
+    "https://scontent-ord5-3.xx.fbcdn.net/...video3.mp4",
+    "https://scontent-ord5-1.xx.fbcdn.net/...video4.mp4"
   ],
-  "video_count": 2,
+  "video_count": 4,
   "error": null
 }
 ```
 
-**For Images:**
-```json
-{
-  "job_id": "123",
-  "success": true,
-  "prompt": "a futuristic city, in 16:9 aspect ratio",
-  "media_type": "image",
-  "image_urls": [
-    "https://scontent...jpg"
-  ],
-  "image_count": 1,
-  "video_urls": [
-    "https://scontent...jpg"
-  ],
-  "video_count": 1,
-  "error": null
-}
+If `success == true`, the full body is stored in Redis:
 ```
-*(Note: `video_urls` is included even for images to prevent breaking older n8n workflows that explicitly look for the `video_urls` key).*
+KEY:   d70e01fd-22d4-4b9e-abe1-c30c7144c67d
+VALUE: JSON.stringify(body)
+```
 
-If `success` is `false`, the `error` field will contain the error message, and a screenshot will be saved in your GitHub Actions logs for debugging.
+---
 
-## Future Improvements & Limitations
+## 🔍 Retrieving Results
 
-Since this script relies on UI Automation (web scraping) of `meta.ai/create`, it is sensitive to changes in Meta's website design. 
+Poll Redis using the `job_id` returned from the generate endpoint:
 
-**Potential Future Issues:**
-- **Selectors Change:** If Meta AI changes the class names, placeholders (e.g., changing "Describe your animation" to something else), or the data-testids of the input boxes, the script's `Locator` functions will time out and fail.
-- **Login Wall Updates:** If Meta changes how cookies are handled or implements a stricter bot-protection mechanism, the headless browser might get blocked.
+```javascript
+// n8n Redis GET node → Key: your job_id
 
-**How to Maintain:**
-- If the script breaks in the future, check the `error_screenshot.png` generated in the GitHub Actions run.
-- You may need to update the text selectors in `meta_ai_bot.py` (e.g., `get_by_placeholder`, `get_by_role('button', name="Animate")`) to match the new UI.
+// Extract video URLs after GET:
+={{ JSON.parse($json.value).video_urls }}
+```
+
+---
+
+## 🗄️ Redis Key Map
+
+| Key | Value | Set by |
+|-----|-------|--------|
+| `meta_cookies_b64` | base64 encoded Meta AI cookies | Flow 1 |
+| `{job_id}` | Full JSON response body (stringified) | Flow 3 |
+
+---
+
+## ⏱️ Timing
+
+| Step | Duration |
+|------|----------|
+| API response (`job_id`) | ~instant |
+| GitHub Actions queue | ~10–30 sec |
+| Browser automation + generation | ~2–3 min |
+| **Total time to videos** | **~3–4 min** |
+
+---
+
+## 🐛 Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `No video URLs found` | Cookies expired — re-run Flow 1 with fresh cookies |
+| `Failed to navigate` | Meta AI may be down or rate-limiting |
+| `Invalid argument type` in Redis | Wrap value with `JSON.stringify()` |
+| GitHub Action not triggered | Check Bearer token has `repo` scope |
+| Webhook not receiving results | Verify n8n instance is publicly accessible |
+
+---
+
+## 🔮 Roadmap — Upcoming Features
+
+### 🖼️ Image to Video
+Convert a static image into a short animated video. The pipeline will accept an image URL or base64 input, upload it to Meta AI, and return the generated video.
+
+### ✍️ Text to Video *(Enhanced)*
+Improve the current flow with support for style parameters, aspect ratio selection, duration control, and prompt templates for more consistent output quality.
+
+### 🎞️ Video to Video
+Use an existing video as a reference and apply a new prompt on top of it to transform the style, motion, or content — similar to img2img but for video.
+
+### 🎨 Animate (Image Animation)
+Bring still images to life by applying motion to them. Input a photo and a motion prompt, get back an animated video clip — great for portraits, product shots, and landscapes.
+
+---
+
+## 📄 License
+
+MIT License — free to use, modify, and distribute.
+
+---
+
+## 🙏 Built With
+
+[Playwright](https://playwright.dev/) · [n8n](https://n8n.io/) · [GitHub Actions](https://github.com/features/actions) · [Redis](https://redis.io/)
