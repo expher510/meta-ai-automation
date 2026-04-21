@@ -124,3 +124,15 @@ Create a **Webhook** node in n8n to receive the result. The payload sent by the 
 *(Note: `video_urls` is included even for images to prevent breaking older n8n workflows that explicitly look for the `video_urls` key).*
 
 If `success` is `false`, the `error` field will contain the error message, and a screenshot will be saved in your GitHub Actions logs for debugging.
+
+## Future Improvements & Limitations
+
+Since this script relies on UI Automation (web scraping) of `meta.ai/create`, it is sensitive to changes in Meta's website design. 
+
+**Potential Future Issues:**
+- **Selectors Change:** If Meta AI changes the class names, placeholders (e.g., changing "Describe your animation" to something else), or the data-testids of the input boxes, the script's `Locator` functions will time out and fail.
+- **Login Wall Updates:** If Meta changes how cookies are handled or implements a stricter bot-protection mechanism, the headless browser might get blocked.
+
+**How to Maintain:**
+- If the script breaks in the future, check the `error_screenshot.png` generated in the GitHub Actions run.
+- You may need to update the text selectors in `meta_ai_bot.py` (e.g., `get_by_placeholder`, `get_by_role('button', name="Animate")`) to match the new UI.
