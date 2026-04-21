@@ -73,6 +73,11 @@ def send_to_webhook(webhook_url, media_urls, prompt, action_type, success=True, 
         print(f"Failed to send webhook: {e}")
 
 def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=None, aspect_ratio="1:1", job_id=None):
+    if not action:
+        action = "text_to_video"
+    if not aspect_ratio:
+        aspect_ratio = "1:1"
+        
     with sync_playwright() as p:
         print("Launching browser...")
         browser = p.chromium.launch(headless=True)
@@ -316,9 +321,9 @@ if __name__ == "__main__":
     parser.add_argument("--webhook", required=True, help="Webhook URL to send the result")
     parser.add_argument("--cookies", required=True, help="Path to the Netscape format cookies file OR the cookie string itself")
     parser.add_argument("--job-id", required=False, default=None, help="Job ID to return with the result")
-    parser.add_argument("--action", required=False, default="text_to_video", choices=["text_to_video", "text_to_image", "animate_generation", "image_to_video"], help="Type of action to perform")
+    parser.add_argument("--action", required=False, default="text_to_video", help="Type of action to perform")
     parser.add_argument("--image-url", required=False, default=None, help="URL of the image to upload for image_to_video action")
-    parser.add_argument("--aspect-ratio", required=False, default="1:1", choices=["1:1", "9:16", "16:9"], help="Aspect ratio for image generation")
+    parser.add_argument("--aspect-ratio", required=False, default="1:1", help="Aspect ratio for image generation")
     
     args = parser.parse_args()
     run(args.prompt, args.webhook, args.cookies, args.action, args.image_url, args.aspect_ratio, args.job_id)
