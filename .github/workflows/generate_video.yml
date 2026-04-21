@@ -1,4 +1,4 @@
-name: Generate Meta AI Video
+name: Meta AI Automation
 
 on:
   repository_dispatch:
@@ -19,6 +19,15 @@ on:
         type: string
       job_id:                          
         description: 'Job ID to track the request'
+        required: false
+        type: string
+      action:
+        description: 'Action to perform (text_to_video, text_to_image, animate_generation, image_to_video)'
+        required: false
+        default: 'text_to_video'
+        type: string
+      image_url:
+        description: 'Image URL for image_to_video action'
         required: false
         type: string
 
@@ -57,7 +66,9 @@ jobs:
             --prompt "${{ github.event.inputs.prompt }}" \
             --webhook "${{ github.event.inputs.webhook_url }}" \
             --cookies cookies.txt \
-            --job-id "${{ github.event.inputs.job_id }}"
+            --job-id "${{ github.event.inputs.job_id }}" \
+            --action "${{ github.event.inputs.action }}" \
+            --image-url "${{ github.event.inputs.image_url }}"
 
       - name: Run Playwright Script (Repository Dispatch)
         if: github.event_name == 'repository_dispatch'
@@ -66,7 +77,9 @@ jobs:
             --prompt "${{ github.event.client_payload.prompt }}" \
             --webhook "${{ github.event.client_payload.webhook_url }}" \
             --cookies cookies.txt \
-            --job-id "${{ github.event.client_payload.job_id }}"
+            --job-id "${{ github.event.client_payload.job_id }}" \
+            --action "${{ github.event.client_payload.action }}" \
+            --image-url "${{ github.event.client_payload.image_url }}"
 
       - name: Upload Error Screenshot
         if: failure()
