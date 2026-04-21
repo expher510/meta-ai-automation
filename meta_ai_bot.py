@@ -157,7 +157,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 print(f"Setting aspect ratio to {aspect_ratio}...")
                 try:
                     # Find any button that looks like an aspect ratio (1:1, 9:16, 16:9)
-                    ratio_btn = page.locator('div[role="button"]').filter(has_text=re.compile(r"^(1:1|9:16|16:9)$")).first
+                    ratio_btn = page.locator('button, div[role="button"]').filter(has_text=re.compile(r"1:1|9:16|16:9")).last
                     if ratio_btn.count() > 0:
                         ratio_btn.click(timeout=5000)
                         time.sleep(1)
@@ -184,8 +184,14 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 time.sleep(3) # wait for upload
             
             print(f"Typing prompt: {prompt}")
-            chat_input.fill(prompt)
-            chat_input.press("Enter")
+            try:
+                chat_input.fill(prompt, force=True)
+            except Exception as e:
+                print(f"Fill failed, trying keyboard: {e}")
+                chat_input.click(force=True)
+                page.keyboard.type(prompt)
+            
+            page.keyboard.press("Enter")
             
             print(f"Prompt submitted. Executing action: {action}")
             
@@ -195,8 +201,11 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 time.sleep(5)
                 imgs = page.locator('img[src^="https://scontent"]').all()
                 img_urls = [img.get_attribute("src") for img in imgs if img.get_attribute("src")]
+                # Limit to latest 4 images to prevent payload bloat from history gallery
+                img_urls = img_urls[:4]
+                
                 if img_urls:
-                    print(f"Success! Found {len(img_urls)} image(s)")
+                    print(f"Success! Found {len(img_urls)} new image(s)")
                     send_to_webhook(webhook_url, img_urls, prompt, action, True, job_id=job_id)
                 else:
                     raise Exception("No image URLs found")
@@ -231,9 +240,11 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 time.sleep(10)
                 video_elements = page.locator('video').all()
                 video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
+                # Limit to latest 4 videos
+                video_urls = video_urls[:4]
                 
                 if video_urls:
-                    print(f"Success! Found {len(video_urls)} video(s)")
+                    print(f"Success! Found {len(video_urls)} new video(s)")
                     send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
                 else:
                     raise Exception("No video URLs found after animating")
@@ -247,13 +258,14 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                     
                     video_elements = page.locator('video').all()
                     video_urls = []
-                    for i, video in enumerate(video_elements):
+                    for video in video_elements:
                         src = video.get_attribute("src")
                         if src:
                             video_urls.append(src)
-                            print(f"Video {i+1}: {src[:80]}...")
-                            
-                    print(f"Total videos found: {len(video_urls)}")
+                    
+                    # Limit to latest 4 videos
+                    video_urls = video_urls[:4]
+                    print(f"Total new videos found: {len(video_urls)}")
                     
                     if video_urls:
                         send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
@@ -269,7 +281,7 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                         page.wait_for_selector('video', timeout=180000)
                         time.sleep(10)
                         video_elements = page.locator('video').all()
-                        video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
+                        video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")][:4]
                         if video_urls:
                             send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
                             return
