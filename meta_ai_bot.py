@@ -127,10 +127,20 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
 
             if (is_video_mode and current_mode == "Image") or (not is_video_mode and current_mode == "Video"):
                 print(f"Switching mode to {'Video' if is_video_mode else 'Image'}...")
-                mode_button.click()
-                time.sleep(1)
-                page.get_by_role("menuitem", name="Video" if is_video_mode else "Image").click()
-                time.sleep(2)
+                try:
+                    mode_button.click()
+                    time.sleep(2)
+                    # Try several ways to find the menu item
+                    target = "Video" if is_video_mode else "Image"
+                    menu_item = page.get_by_text(target, exact=True).last
+                    if menu_item.count() == 0:
+                        menu_item = page.get_by_role("menuitem", name=target).first
+                    
+                    menu_item.click(timeout=10000)
+                    print(f"Successfully clicked {target} mode.")
+                    time.sleep(2)
+                except Exception as e:
+                    print(f"Failed to switch mode via dropdown: {e}. Trying to proceed anyway...")
 
             # Grab textbox using data-testid which is more reliable
             chat_input = page.locator('textarea[data-testid="composer-input"]').first
