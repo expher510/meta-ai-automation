@@ -4,418 +4,312 @@ import requests
 import sys
 import os
 import re
-import json
-import base64
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from playwright.sync_api import sync_playwright
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def parse_netscape_cookies(file_path_or_content: str) -> list[dict]:
-    """Parse cookies from a file path, JSON string, or Netscape text."""
-    content = ""
+def parse_netscape_cookies(file_path_or_content):
+    cookies = []
     try:
-        with open(file_path_or_content, "r", encoding="utf-8") as f:
+        with open(file_path_or_content, 'r', encoding='utf-8') as f:
             content = f.read()
     except OSError:
         content = file_path_or_content
-
-    # Try JSON first
     try:
-        parsed = json.loads(content)
-        if isinstance(parsed, list):
-            return parsed
+        import json
+        cookies = json.loads(content)
+        if isinstance(cookies, list):
+            return cookies
     except Exception:
         pass
-
-    # Netscape / tab-separated format
-    cookies: list[dict] = []
-    for line in content.splitlines():
-        if line.startswith("#") or not line.strip():
+    lines = content.splitlines()
+    for line in lines:
+        if line.startswith('#') or not line.strip():
             continue
-        parts = line.strip().split("\t")
+        parts = line.strip().split('\t')
         if len(parts) >= 7:
-            cookie: dict = {
-                "domain": parts[0],
-                "path": parts[2],
-                "secure": parts[3].lower() == "true",
-                "name": parts[5],
-                "value": parts[6],
+            cookie = {
+                'domain': parts[0],
+                'path': parts[2],
+                'secure': parts[3].lower() == 'true',
+                'name': parts[5],
+                'value': parts[6]
             }
             try:
                 expires = float(parts[4])
                 if expires > 0:
-                    cookie["expires"] = expires
+                    cookie['expires'] = expires
             except ValueError:
                 pass
             cookies.append(cookie)
     return cookies
 
-
-def send_to_webhook(
-    webhook_url: str,
-    media_urls: list[str],
-    prompt: str,
-    action_type: str,
-    success: bool = True,
-    error: str | None = None,
-    job_id: str | None = None,
-    retries: int = 3,
-) -> None:
-    """POST result to webhook with exponential back-off retry."""
+def send_to_webhook(webhook_url, media_urls, prompt, action_type, success=True, error=None, job_id=None):
     if not webhook_url:
-        print("[webhook] No URL provided — skipping.")
+        print("No webhook URL provided. Skipping webhook.")
         return
-
-    is_video = action_type in ("text_to_video", "animate_generation", "image_to_video")
+        
     payload = {
         "job_id": job_id,
         "success": success,
         "prompt": prompt,
-        "media_type": "video" if is_video else "image",
-        "error": error,
-        "video_urls": media_urls if is_video else [],
-        "video_count": len(media_urls) if is_video else 0,
-        "image_urls": media_urls if not is_video else [],
-        "image_count": len(media_urls) if not is_video else 0,
+        "media_type": "video" if action_type in ["text_to_video", "animate_generation", "image_to_video"] else "image",
+        "error": error
     }
+    
+    if payload["media_type"] == "video":
+        payload["video_urls"] = media_urls
+        payload["video_count"] = len(media_urls) if media_urls else 0
+    else:
+        payload["image_urls"] = media_urls
+        payload["image_count"] = len(media_urls) if media_urls else 0
+        payload["video_urls"] = media_urls
+        payload["video_count"] = len(media_urls) if media_urls else 0
+    
+    print(f"Sending webhook to {webhook_url}...")
+    try:
+        response = requests.post(webhook_url, json=payload, timeout=30)
+        response.raise_for_status()
+        print(f"Successfully sent result to webhook. HTTP Status: {response.status_code}")
+    except Exception as e:
+        print(f"Failed to send webhook: {e}")
 
-    for attempt in range(1, retries + 1):
-        try:
-            print(f"[webhook] Attempt {attempt}/{retries} → {webhook_url}")
-            resp = requests.post(webhook_url, json=payload, timeout=30)
-            resp.raise_for_status()
-            print(f"[webhook] OK — HTTP {resp.status_code}")
-            return
-        except Exception as exc:
-            print(f"[webhook] Attempt {attempt} failed: {exc}")
-            if attempt < retries:
-                time.sleep(2 ** attempt)  # 2s, 4s, …
-
-    print("[webhook] All attempts failed.")
-
-
-# ---------------------------------------------------------------------------
-# Core automation
-# ---------------------------------------------------------------------------
-
-def run(
-    prompt: str,
-    webhook_url: str,
-    cookies_input: str,
-    action: str = "text_to_video",
-    image_url: str | None = None,
-    aspect_ratio: str = "1:1",
-    job_id: str | None = None,
-) -> None:
-    # Normalise optional args that may arrive as empty strings from CLI
-    action = action.strip() or "text_to_video"
-    aspect_ratio = aspect_ratio.strip() or "1:1"
-    image_url = image_url.strip() if image_url else None
-
+def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=None, aspect_ratio="1:1", job_id=None):
+    if not action:
+        action = "text_to_video"
+    if not aspect_ratio:
+        aspect_ratio = "1:1"
+        
     with sync_playwright() as p:
-        print("[browser] Launching Chromium (headless)…")
+        print("Launching browser...")
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-
-        # --- Cookies ---
-        print("[cookies] Parsing…")
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        print("Parsing cookies...")
         cookies = parse_netscape_cookies(cookies_input)
-        if not cookies:
-            print("[cookies] ERROR: No cookies parsed — aborting.")
-            send_to_webhook(
-                webhook_url, [], prompt, action, False,
-                "No cookies parsed", job_id=job_id
-            )
+        if cookies:
+            context.add_cookies(cookies)
+            print(f"Loaded {len(cookies)} cookies into the browser context.")
+        else:
+            print("WARNING: No cookies parsed. You might be asked to log in, which will fail the automation.")
+            
+        page = context.new_page()
+        
+        print("Navigating to https://meta.ai/create ...")
+        try:
+            page.goto("https://meta.ai/create", timeout=60000)
+            page.wait_for_load_state("domcontentloaded")
+            time.sleep(5) # Wait for UI to stabilize
+        except Exception as e:
+            print(f"Failed to navigate: {e}")
+            send_to_webhook(webhook_url, [], prompt, action, False, str(e), job_id=job_id)
             browser.close()
             return
-        context.add_cookies(cookies)
-        print(f"[cookies] Loaded {len(cookies)} cookies.")
-
-        page = context.new_page()
-        temp_img_path = "temp_upload_img.jpg"
-
+            
         try:
-            # ----------------------------------------------------------------
-            # Navigation — wait until the composer textarea is actually ready
-            # ----------------------------------------------------------------
-            print("[nav] Navigating to https://meta.ai/create …")
-            page.goto("https://meta.ai/create", timeout=60_000)
-
-            composer = page.locator('textarea[data-testid="composer-input"]').first
+            print("Looking for the chat input box...")
+            
+            # Mode selection
+            is_video_mode = action in ["text_to_video"]
+            
+            # Wait for UI to settle
+            time.sleep(3)
+            
+            # Check current placeholder to see if we need to switch
+            placeholder_text = "Describe your animation" if is_video_mode else "Describe your image"
+            
+            # Find the mode toggle button (it usually shows 'Image' or 'Video')
+            mode_button = page.locator('button:has-text("Image"), button:has-text("Video")').last
+            
+            current_mode = "Video" if "animation" in (page.get_by_role("textbox").first.get_attribute("placeholder") or "").lower() else "Image"
+            # Alternative check if role textbox fails
             try:
-                composer.wait_for(state="attached", timeout=20_000)
-            except PWTimeout:
-                raise RuntimeError(
-                    "Composer input never appeared — likely not logged in."
-                )
+                placeholder = page.locator('textarea[data-testid="composer-input"]').get_attribute("placeholder")
+                current_mode = "Video" if "animation" in (placeholder or "").lower() else "Image"
+            except:
+                pass
 
-            # ----------------------------------------------------------------
-            # Capture baseline element sets AFTER page is ready
-            # ----------------------------------------------------------------
-            initial_video_srcs: set[str] = set(page.evaluate("Array.from(document.querySelectorAll('video')).map(v => v.src).filter(Boolean)"))
-            initial_image_srcs: set[str] = set(page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)"))
-            print(
-                f"[baseline] {len(initial_video_srcs)} videos, "
-                f"{len(initial_image_srcs)} images before generation."
-            )
-
-            # ----------------------------------------------------------------
-            # Mode selection (Image / Video)
-            # ----------------------------------------------------------------
-            is_video_mode = action in ("text_to_video",)
-
-            try:
-                placeholder: str = composer.get_attribute("placeholder") or ""
-                current_is_video = "animation" in placeholder.lower()
-            except Exception:
-                current_is_video = False
-
-            if is_video_mode != current_is_video:
-                target_mode = "Video" if is_video_mode else "Image"
-                print(f"[mode] Switching to {target_mode}…")
+            if (is_video_mode and current_mode == "Image") or (not is_video_mode and current_mode == "Video"):
+                print(f"Switching mode to {'Video' if is_video_mode else 'Image'}...")
                 try:
-                    # Click the mode toggle button
-                    mode_btn = page.locator(
-                        'button[aria-label*="mode"], button:has-text("Image"), button:has-text("Video")'
-                    ).last
-                    mode_btn.click(timeout=5_000)
+                    mode_button.click()
+                    time.sleep(2)
+                    # Try several ways to find the menu item
+                    target = "Video" if is_video_mode else "Image"
+                    menu_item = page.get_by_text(target, exact=True).last
+                    if menu_item.count() == 0:
+                        menu_item = page.get_by_role("menuitem", name=target).first
+                    
+                    menu_item.click(timeout=10000)
+                    print(f"Successfully clicked {target} mode.")
+                    time.sleep(2)
+                except Exception as e:
+                    print(f"Failed to switch mode via dropdown: {e}. Trying to proceed anyway...")
 
-                    # Try role first, fall back to text match
-                    menu_item = None
-                    try:
-                        item = page.get_by_role("menuitem", name=target_mode).first
-                        item.wait_for(state="visible", timeout=4_000)
-                        menu_item = item
-                    except PWTimeout:
-                        item = page.get_by_text(target_mode, exact=True).last
-                        item.wait_for(state="visible", timeout=4_000)
-                        menu_item = item
+            # Grab textbox using data-testid which is more reliable
+            chat_input = page.locator('textarea[data-testid="composer-input"]').first
+            chat_input.wait_for(state="attached", timeout=15000)
+            
+            # Sometimes it's hidden but interactive, or becomes visible after a click
+            try:
+                chat_input.click(force=True)
+            except:
+                pass
 
-                    menu_item.click(timeout=5_000)
-                    print(f"[mode] Switched to {target_mode}.")
-                except Exception as exc:
-                    print(f"[mode] Could not switch mode: {exc} — proceeding anyway.")
-
-            # ----------------------------------------------------------------
-            # Aspect ratio
-            # ----------------------------------------------------------------
+            # Aspect ratio selection
             if aspect_ratio and aspect_ratio != "1:1":
-                print(f"[aspect] Setting aspect ratio → {aspect_ratio}…")
+                print(f"Setting aspect ratio to {aspect_ratio}...")
                 try:
-                    ratio_btn = page.locator(
-                        'button, div[role="button"]'
-                    ).filter(has_text=re.compile(r"1:1|9:16|16:9")).last
+                    # Find any button that looks like an aspect ratio (1:1, 9:16, 16:9)
+                    ratio_btn = page.locator('button, div[role="button"]').filter(has_text=re.compile(r"1:1|9:16|16:9")).last
                     if ratio_btn.count() > 0:
-                        ratio_btn.click(force=True, timeout=5_000)
-                        target = page.get_by_text(aspect_ratio, exact=True).last
-                        target.wait_for(state="visible", timeout=3_000)
-                        target.click(force=True, timeout=5_000)
+                        ratio_btn.click(force=True, timeout=5000)
+                        time.sleep(1)
+                        page.get_by_text(aspect_ratio, exact=True).last.click(force=True, timeout=5000)
+                        time.sleep(1)
                     else:
-                        print("[aspect] Dropdown not found — skipping.")
-                except Exception as exc:
-                    print(f"[aspect] Could not set aspect ratio: {exc}")
+                        print("Aspect ratio dropdown not found. It might be unavailable.")
+                except Exception as ratio_e:
+                    print(f"Could not set aspect ratio: {ratio_e}")
 
-            # ----------------------------------------------------------------
-            # Image upload (image_to_video)
-            # ----------------------------------------------------------------
+            # Handle Image Upload if needed
             if action == "image_to_video":
                 if not image_url:
-                    raise ValueError("--image-url is required for image_to_video")
-
+                    raise Exception("image_url is required for image_to_video action")
                 if image_url.startswith("http"):
-                    print(f"[upload] Downloading image from {image_url}…")
-                    img_data = requests.get(image_url, timeout=30).content
-                    with open(temp_img_path, "wb") as f:
+                    print(f"Downloading image from {image_url}...")
+                    img_data = requests.get(image_url).content
+                    with open("temp_upload_img.jpg", "wb") as f:
                         f.write(img_data)
-                    upload_path = temp_img_path
+                    upload_path = "temp_upload_img.jpg"
                 else:
                     upload_path = image_url
-
-                print("[upload] Setting file input…")
+                    
+                print("Uploading image...")
                 file_input = page.locator('input[type="file"]').first
-                file_input.wait_for(state="attached", timeout=10_000)
+                if not file_input:
+                    raise Exception("Could not find file input element")
                 file_input.set_input_files(upload_path)
+                time.sleep(8) # wait for upload
+            
+            # Count existing media to detect new generations
+            initial_video_count = page.locator('video').count()
+            initial_image_count = page.locator('img[src^="https://scontent"]').count()
 
-                # Wait for upload indicator rather than a fixed sleep
-                try:
-                    page.wait_for_selector(
-                        '[data-testid="upload-preview"], img[alt*="upload"]',
-                        timeout=15_000,
-                    )
-                    print("[upload] Upload confirmed.")
-                except PWTimeout:
-                    print("[upload] Upload indicator not found — continuing anyway.")
-
-            # ----------------------------------------------------------------
-            # Type prompt & submit
-            # ----------------------------------------------------------------
-            print(f"[prompt] Typing: {prompt!r}")
-            composer.click(force=True)
-            page.keyboard.type(prompt, delay=10)
-            page.wait_for_timeout(500)
+            print(f"Typing prompt: {prompt}")
+            try:
+                chat_input.fill(prompt, force=True)
+            except Exception as e:
+                print(f"Fill failed, trying keyboard: {e}")
+                chat_input.click(force=True)
+                page.keyboard.type(prompt)
+            
             page.keyboard.press("Enter")
-            print("[prompt] Submitted.")
-
-            # ----------------------------------------------------------------
-            # Wait for results
-            # ----------------------------------------------------------------
+            
+            print(f"Prompt submitted. Executing action: {action}")
+            
             if action == "text_to_image":
-                _wait_for_images(page, initial_image_srcs, webhook_url, prompt, action, job_id)
-
-            elif action in ("animate_generation", "image_to_video", "text_to_video"):
-                _wait_for_video(page, initial_video_srcs, initial_image_srcs, webhook_url, prompt, action, job_id)
-
-            else:
-                raise ValueError(f"Unknown action: {action!r}")
-
-        except Exception as exc:
-            print(f"[error] {exc}")
+                print("Waiting for images to generate...")
+                for _ in range(60):
+                    time.sleep(3)
+                    if page.locator('img[src^="https://scontent"]').count() > initial_image_count:
+                        break
+                else:
+                    print("Timeout waiting for new image. Proceeding anyway...")
+                    
+                time.sleep(5)
+                imgs = page.locator('img[src^="https://scontent"]').all()
+                img_urls = [img.get_attribute("src") for img in imgs if img.get_attribute("src")]
+                # Return the new images (difference in count, max 4)
+                new_count = max(1, min(4, len(img_urls) - initial_image_count))
+                img_urls = img_urls[:new_count]
+                
+                if img_urls:
+                    print(f"Success! Found {len(img_urls)} new image(s)")
+                    send_to_webhook(webhook_url, img_urls, prompt, action, True, job_id=job_id)
+                else:
+                    raise Exception("No image URLs found")
+                    
+            elif action in ["animate_generation", "image_to_video", "text_to_video"]:
+                print("Waiting for generation to finish...")
+                
+                clicked_animate = False
+                found_video = False
+                
+                for _ in range(60):
+                    time.sleep(3)
+                    
+                    # 1. Did a video appear directly?
+                    if page.locator('video').count() > initial_video_count:
+                        print("New video detected!")
+                        found_video = True
+                        break
+                        
+                    # 2. Did an image appear that needs to be animated?
+                    if not clicked_animate:
+                        animate_btn = page.locator('button:has-text("Animate")').last
+                        
+                        if animate_btn.count() == 0:
+                            # Try hovering the latest image to reveal the Animate button
+                            imgs = page.locator('img[src^="https://scontent"]').all()
+                            if imgs and len(imgs) > initial_image_count:
+                                try:
+                                    imgs[-1].hover(force=True)
+                                    time.sleep(1)
+                                    animate_btn = page.locator('button:has-text("Animate")').last
+                                except:
+                                    pass
+                                    
+                        if animate_btn.count() > 0:
+                            print(f"Found Animate button. Clicking it to generate video...")
+                            try:
+                                animate_btn.click(force=True)
+                                clicked_animate = True
+                                print("Clicked Animate! Waiting for video...")
+                            except Exception as click_e:
+                                print(f"Failed to click Animate: {click_e}")
+                
+                if not found_video:
+                    print("Timeout waiting for video. Proceeding anyway...")
+                    
+                time.sleep(5)
+                video_elements = page.locator('video').all()
+                video_urls = [v.get_attribute("src") for v in video_elements if v.get_attribute("src")]
+                
+                new_count = max(1, min(4, len(video_urls) - initial_video_count))
+                video_urls = video_urls[:new_count]
+                
+                if video_urls:
+                    print(f"Success! Found {len(video_urls)} new video(s)")
+                    send_to_webhook(webhook_url, video_urls, prompt, action, True, job_id=job_id)
+                else:
+                    raise Exception("No video URLs found after processing")
+                
+        except Exception as e:
+            print(f"Error during automation: {e}")
             try:
                 page.screenshot(path="error_screenshot.png")
-                print("[error] Screenshot saved → error_screenshot.png")
-            except Exception:
+                print("Saved error screenshot to error_screenshot.png")
+            except:
                 pass
-            send_to_webhook(webhook_url, [], prompt, action, False, str(exc), job_id=job_id)
-
+            send_to_webhook(webhook_url, [], prompt, action, False, str(e), job_id=job_id)
+            
         finally:
-            print("[browser] Closing.")
+            print("Closing browser...")
             browser.close()
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
-                print(f"[cleanup] Removed {temp_img_path}")
-
-
-# ---------------------------------------------------------------------------
-# Result-waiting helpers (extracted for clarity)
-# ---------------------------------------------------------------------------
-
-def _new_srcs(current: list[str], baseline: set[str]) -> list[str]:
-    """Return URLs that are genuinely new (not in baseline)."""
-    return [u for u in current if u and u not in baseline]
-
-
-def _wait_for_images(
-    page, initial_srcs: set[str], webhook_url, prompt, action, job_id
-) -> None:
-    print("[images] Waiting for new images…")
-    found = False
-    for _ in range(60):
-        page.wait_for_timeout(3_000)
-        current = page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)")
-        new_urls = _new_srcs(current, initial_srcs)
-        if new_urls:
-            found = True
-            break
-
-    if not found:
-        print("[images] Timeout — collecting whatever is available.")
-        current = page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)")
-        new_urls = _new_srcs(current, initial_srcs)
-
-    new_urls = new_urls[:4]  # cap at 4
-    if new_urls:
-        print(f"[images] Found {len(new_urls)} new image(s).")
-        send_to_webhook(webhook_url, new_urls, prompt, action, True, job_id=job_id)
-    else:
-        raise RuntimeError("No new image URLs found after generation.")
-
-
-def _wait_for_video(
-    page, initial_video_srcs: set[str], initial_image_srcs: set[str],
-    webhook_url, prompt, action, job_id
-) -> None:
-    print("[video] Waiting for generation…")
-    found_video = False
-    clicked_animate = False
-
-    for _ in range(120):
-        page.wait_for_timeout(3_000)
-
-        # Check for direct video appearance
-        current_videos = page.evaluate("Array.from(document.querySelectorAll('video')).map(v => v.src).filter(Boolean)")
-        new_vids = _new_srcs(current_videos, initial_video_srcs)
-        if new_vids:
-            print("[video] New video detected!")
-            found_video = True
-            break
-
-        # Check for Animate button on a new image
-        if not clicked_animate:
-            current_imgs = page.evaluate("Array.from(document.querySelectorAll('img[src^=\"https://scontent\"]')).map(i => i.src).filter(Boolean)")
-            if _new_srcs(current_imgs, initial_image_srcs):
-                animate_btn = page.locator(
-                    'button[aria-label*="Animate"], button:has-text("Animate")'
-                ).last
-                if animate_btn.count() == 0:
-                    # Try hovering last image to reveal button
-                    try:
-                        imgs_locator = page.locator('img[src^="https://scontent"]')
-                        if imgs_locator.count() > 0:
-                            imgs_locator.last.hover(force=True)
-                            page.wait_for_timeout(800)
-                            animate_btn = page.locator(
-                                'button[aria-label*="Animate"], button:has-text("Animate")'
-                            ).last
-                    except Exception:
-                        pass
-
-                if animate_btn.count() > 0:
-                    try:
-                        animate_btn.click(force=True, timeout=5_000)
-                        clicked_animate = True
-                        print("[video] Clicked Animate — waiting for video…")
-                    except Exception as exc:
-                        print(f"[video] Failed to click Animate: {exc}")
-
-    if not found_video:
-        print("[video] Timeout — collecting whatever is available.")
-
-    page.wait_for_timeout(2_000)
-    current_videos = page.evaluate("Array.from(document.querySelectorAll('video')).map(v => v.src).filter(Boolean)")
-    new_vids = _new_srcs(current_videos, initial_video_srcs)[:4]
-
-    if new_vids:
-        print(f"[video] Found {len(new_vids)} new video(s).")
-        send_to_webhook(webhook_url, new_vids, prompt, action, True, job_id=job_id)
-    else:
-        raise RuntimeError("No new video URLs found after generation.")
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+            if os.path.exists("temp_upload_img.jpg"):
+                os.remove("temp_upload_img.jpg")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Meta AI Video/Image Generation Automation"
-    )
-    parser.add_argument("--prompt",       required=True,  help="Generation prompt")
-    parser.add_argument("--webhook",      required=True,  help="Webhook URL for result")
-    parser.add_argument("--cookies",      required=True,  help="Cookies file path or raw string")
-    parser.add_argument("--job-id",       required=False, default=None)
-    parser.add_argument("--action",       required=False, default="text_to_video")
-    parser.add_argument("--image-url",    required=False, default=None)
-    parser.add_argument("--aspect-ratio", required=False, default="1:1")
-
+    parser = argparse.ArgumentParser(description="Meta AI Video/Image Generation Automation")
+    parser.add_argument("--prompt", required=True, help="Prompt to generate")
+    parser.add_argument("--webhook", required=True, help="Webhook URL to send the result")
+    parser.add_argument("--cookies", required=True, help="Path to the Netscape format cookies file OR the cookie string itself")
+    parser.add_argument("--job-id", required=False, default=None, help="Job ID to return with the result")
+    parser.add_argument("--action", required=False, default="text_to_video", help="Type of action to perform")
+    parser.add_argument("--image-url", required=False, default=None, help="URL of the image to upload for image_to_video action")
+    parser.add_argument("--aspect-ratio", required=False, default="1:1", help="Aspect ratio for image generation")
+    
     args = parser.parse_args()
-    run(
-        prompt=args.prompt,
-        webhook_url=args.webhook,
-        cookies_input=args.cookies,
-        action=args.action,
-        image_url=args.image_url,
-        aspect_ratio=args.aspect_ratio,
-        job_id=args.job_id,
-    )
+    run(args.prompt, args.webhook, args.cookies, args.action, args.image_url, args.aspect_ratio, args.job_id)
