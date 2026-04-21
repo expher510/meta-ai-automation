@@ -111,7 +111,7 @@ jobs:
             --aspect-ratio "$ASPECT_RATIO"
 
       - name: Upload Error Screenshot
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: error-screenshot
