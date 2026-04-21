@@ -54,7 +54,7 @@ def parse_netscape_cookies(file_path_or_content):
             
     return cookies
 
-def run(prompt, webhook_url, cookies_input):
+def run(prompt, webhook_url, cookies_input, job_id=None):
     with sync_playwright() as p:
         print("Launching browser...")
         browser = p.chromium.launch(headless=True)
@@ -79,7 +79,7 @@ def run(prompt, webhook_url, cookies_input):
             page.wait_for_load_state("networkidle")
         except Exception as e:
             print(f"Failed to navigate: {e}")
-            send_to_webhook(webhook_url, str(e), prompt, False)
+            send_to_webhook(webhook_url, [], prompt, False, str(e), job_id=job_id)
             browser.close()
             return
             
@@ -111,10 +111,10 @@ def run(prompt, webhook_url, cookies_input):
             video_url = video_locator.get_attribute("src")
             if video_url:
                 print(f"Success! Generated Video URL: {video_url}")
-                send_to_webhook(webhook_url, video_url, prompt, True)
+                send_to_webhook(webhook_url, [video_url], prompt, True, job_id=job_id)
             else:
                 print("Video element found, but could not extract the 'src' attribute.")
-                send_to_webhook(webhook_url, "Video element found but no src attribute", prompt, False)
+                send_to_webhook(webhook_url, [], prompt, False, "Video element found but no src attribute", job_id=job_id)
                 
         except Exception as e:
             print(f"Error during automation: {e}")
@@ -124,21 +124,24 @@ def run(prompt, webhook_url, cookies_input):
                 print("Saved error screenshot to error_screenshot.png")
             except:
                 pass
-            send_to_webhook(webhook_url, str(e), prompt, False)
+            send_to_webhook(webhook_url, [], prompt, False, str(e), job_id=job_id)
             
         finally:
             print("Closing browser...")
             browser.close()
 
-def send_to_webhook(webhook_url, result, prompt, success=True):
+def send_to_webhook(webhook_url, video_urls, prompt, success=True, error=None, job_id=None):
     if not webhook_url:
         print("No webhook URL provided. Skipping webhook.")
         return
         
     payload = {
+        "job_id": job_id,
         "success": success,
         "prompt": prompt,
-        "result": result
+        "video_urls": video_urls,
+        "video_count": len(video_urls) if video_urls else 0,
+        "error": error
     }
     
     print(f"Sending webhook to {webhook_url}...")
@@ -154,6 +157,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", required=True, help="Prompt to generate video")
     parser.add_argument("--webhook", required=True, help="Webhook URL to send the result")
     parser.add_argument("--cookies", required=True, help="Path to the Netscape format cookies file OR the cookie string itself")
+    parser.add_argument("--job-id", required=False, default=None, help="Job ID to return with the result")
     
     args = parser.parse_args()
-    run(args.prompt, args.webhook, args.cookies)
+    run(args.prompt, args.webhook, args.cookies, args.job_id)
