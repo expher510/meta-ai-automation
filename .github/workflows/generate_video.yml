@@ -66,27 +66,41 @@ jobs:
 
       - name: Run Playwright Script (Workflow Dispatch)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          PROMPT: ${{ github.event.inputs.prompt }}
+          WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          ACTION: ${{ github.event.inputs.action }}
+          IMAGE_URL: ${{ github.event.inputs.image_url }}
+          ASPECT_RATIO: ${{ github.event.inputs.aspect_ratio }}
         run: |
           python meta_ai_bot.py \
-            --prompt "${{ github.event.inputs.prompt }}" \
-            --webhook "${{ github.event.inputs.webhook_url }}" \
+            --prompt "$PROMPT" \
+            --webhook "$WEBHOOK_URL" \
             --cookies cookies.txt \
-            --job-id "${{ github.event.inputs.job_id }}" \
-            --action "${{ github.event.inputs.action }}" \
-            --image-url "${{ github.event.inputs.image_url }}" \
-            --aspect-ratio "${{ github.event.inputs.aspect_ratio }}"
+            --job-id "$JOB_ID" \
+            --action "$ACTION" \
+            --image-url "$IMAGE_URL" \
+            --aspect-ratio "$ASPECT_RATIO"
 
       - name: Run Playwright Script (Repository Dispatch)
         if: github.event_name == 'repository_dispatch'
+        env:
+          PROMPT: ${{ github.event.client_payload.prompt }}
+          WEBHOOK_URL: ${{ github.event.client_payload.webhook_url }}
+          JOB_ID: ${{ github.event.client_payload.job_id }}
+          ACTION: ${{ github.event.client_payload.action }}
+          IMAGE_URL: ${{ github.event.client_payload.image_url }}
+          ASPECT_RATIO: ${{ github.event.client_payload.aspect_ratio }}
         run: |
           python meta_ai_bot.py \
-            --prompt "${{ github.event.client_payload.prompt }}" \
-            --webhook "${{ github.event.client_payload.webhook_url }}" \
+            --prompt "$PROMPT" \
+            --webhook "$WEBHOOK_URL" \
             --cookies cookies.txt \
-            --job-id "${{ github.event.client_payload.job_id }}" \
-            --action "${{ github.event.client_payload.action }}" \
-            --image-url "${{ github.event.client_payload.image_url }}" \
-            --aspect-ratio "${{ github.event.client_payload.aspect_ratio }}"
+            --job-id "$JOB_ID" \
+            --action "$ACTION" \
+            --image-url "$IMAGE_URL" \
+            --aspect-ratio "$ASPECT_RATIO"
 
       - name: Upload Error Screenshot
         if: failure()
