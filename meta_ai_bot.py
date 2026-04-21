@@ -3,6 +3,7 @@ import time
 import requests
 import sys
 import os
+import re
 from playwright.sync_api import sync_playwright
 
 def parse_netscape_cookies(file_path_or_content):
@@ -60,7 +61,6 @@ def send_to_webhook(webhook_url, media_urls, prompt, action_type, success=True, 
     else:
         payload["image_urls"] = media_urls
         payload["image_count"] = len(media_urls) if media_urls else 0
-        # Fallback for old webhooks expecting video_urls even for images
         payload["video_urls"] = media_urls
         payload["video_count"] = len(media_urls) if media_urls else 0
     
@@ -72,7 +72,7 @@ def send_to_webhook(webhook_url, media_urls, prompt, action_type, success=True, 
     except Exception as e:
         print(f"Failed to send webhook: {e}")
 
-def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=None, job_id=None):
+def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=None, aspect_ratio="1:1", job_id=None):
     with sync_playwright() as p:
         print("Launching browser...")
         browser = p.chromium.launch(headless=True)
@@ -91,9 +91,9 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             
         page = context.new_page()
         
-        print("Navigating to https://meta.ai/ ...")
+        print("Navigating to https://meta.ai/create ...")
         try:
-            page.goto("https://meta.ai/", timeout=60000)
+            page.goto("https://meta.ai/create", timeout=60000)
             page.wait_for_load_state("networkidle")
         except Exception as e:
             print(f"Failed to navigate: {e}")
@@ -103,8 +103,52 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
             
         try:
             print("Looking for the chat input box...")
+            
+            # Mode selection
+            is_video_mode = action in ["text_to_video"]
+            
+            # Wait for UI to settle
+            time.sleep(3)
+            
+            # Check current placeholder
+            placeholder_text = "Describe your animation" if is_video_mode else "Describe your image"
+            chat_input_by_ph = page.get_by_placeholder(re.compile(placeholder_text, re.IGNORECASE)).first
+            
+            if chat_input_by_ph.count() == 0:
+                print("Switching mode via UI dropdown...")
+                try:
+                    if is_video_mode:
+                        # Find the Image dropdown and click it
+                        page.get_by_text("Image", exact=True).last.click(timeout=5000)
+                        time.sleep(1)
+                        page.get_by_text("Video", exact=True).last.click(timeout=5000)
+                    else:
+                        page.get_by_text("Video", exact=True).last.click(timeout=5000)
+                        time.sleep(1)
+                        page.get_by_text("Image", exact=True).last.click(timeout=5000)
+                    time.sleep(2)
+                except Exception as e:
+                    print(f"Could not switch mode cleanly, trying to proceed anyway: {e}")
+
+            # Grab textbox
             chat_input = page.get_by_role("textbox").first
             chat_input.wait_for(state="visible", timeout=15000)
+
+            # Aspect ratio selection (only in image mode usually)
+            if not is_video_mode and aspect_ratio and aspect_ratio != "1:1":
+                print(f"Setting aspect ratio to {aspect_ratio}...")
+                try:
+                    # Find any button that looks like an aspect ratio (1:1, 9:16, 16:9)
+                    ratio_btn = page.locator('div[role="button"]').filter(has_text=re.compile(r"^(1:1|9:16|16:9)$")).first
+                    if ratio_btn.count() > 0:
+                        ratio_btn.click(timeout=5000)
+                        time.sleep(1)
+                        page.get_by_text(aspect_ratio, exact=True).last.click(timeout=5000)
+                        time.sleep(1)
+                    else:
+                        print("Aspect ratio dropdown not found. It might be unavailable.")
+                except Exception as ratio_e:
+                    print(f"Could not set aspect ratio: {ratio_e}")
 
             # Handle Image Upload if needed
             if action == "image_to_video":
@@ -121,16 +165,9 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 file_input.set_input_files("temp_upload_img.jpg")
                 time.sleep(3) # wait for upload
             
-            # For text_to_video, ensure prompt explicitly requests a video to guarantee it generates one
-            actual_prompt = prompt
-            if action == "text_to_video":
-                if not actual_prompt.lower().startswith("animate") and "video" not in actual_prompt.lower():
-                    print("Auto-prefixing prompt with 'Generate an animated video of ' to ensure video creation...")
-                    actual_prompt = f"Generate an animated video of {prompt}"
-
-            print(f"Typing prompt: {actual_prompt}")
+            print(f"Typing prompt: {prompt}")
             chat_input.click()
-            page.keyboard.type(actual_prompt)
+            page.keyboard.type(prompt)
             page.keyboard.press("Enter")
             
             print(f"Prompt submitted. Executing action: {action}")
@@ -203,7 +240,6 @@ def run(prompt, webhook_url, cookies_input, action="text_to_video", image_url=No
                 except Exception as inner_e:
                     print(f"Video element didn't appear naturally. Checking for 'Animate' button fallback...")
                 
-                # Check if it generated an image instead, and if we should animate it
                 try:
                     animate_btn = page.get_by_role("button", name="Animate").first
                     if animate_btn.count() > 0:
@@ -249,6 +285,7 @@ if __name__ == "__main__":
     parser.add_argument("--job-id", required=False, default=None, help="Job ID to return with the result")
     parser.add_argument("--action", required=False, default="text_to_video", choices=["text_to_video", "text_to_image", "animate_generation", "image_to_video"], help="Type of action to perform")
     parser.add_argument("--image-url", required=False, default=None, help="URL of the image to upload for image_to_video action")
+    parser.add_argument("--aspect-ratio", required=False, default="1:1", choices=["1:1", "9:16", "16:9"], help="Aspect ratio for image generation")
     
     args = parser.parse_args()
-    run(args.prompt, args.webhook, args.cookies, args.action, args.image_url, args.job_id)
+    run(args.prompt, args.webhook, args.cookies, args.action, args.image_url, args.aspect_ratio, args.job_id)

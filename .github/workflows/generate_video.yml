@@ -30,6 +30,11 @@ on:
         description: 'Image URL for image_to_video action'
         required: false
         type: string
+      aspect_ratio:
+        description: 'Aspect ratio for image generation (1:1, 9:16, 16:9)'
+        required: false
+        default: '1:1'
+        type: string
 
 jobs:
   run-automation:
@@ -68,7 +73,8 @@ jobs:
             --cookies cookies.txt \
             --job-id "${{ github.event.inputs.job_id }}" \
             --action "${{ github.event.inputs.action }}" \
-            --image-url "${{ github.event.inputs.image_url }}"
+            --image-url "${{ github.event.inputs.image_url }}" \
+            --aspect-ratio "${{ github.event.inputs.aspect_ratio }}"
 
       - name: Run Playwright Script (Repository Dispatch)
         if: github.event_name == 'repository_dispatch'
@@ -79,7 +85,8 @@ jobs:
             --cookies cookies.txt \
             --job-id "${{ github.event.client_payload.job_id }}" \
             --action "${{ github.event.client_payload.action }}" \
-            --image-url "${{ github.event.client_payload.image_url }}"
+            --image-url "${{ github.event.client_payload.image_url }}" \
+            --aspect-ratio "${{ github.event.client_payload.aspect_ratio }}"
 
       - name: Upload Error Screenshot
         if: failure()

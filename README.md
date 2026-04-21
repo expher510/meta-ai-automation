@@ -42,11 +42,12 @@ Use the **HTTP Request** node in n8n with the following settings:
 {
   "event_type": "generate_video",
   "client_payload": {
-    "prompt": "a futuristic city, in 16:9 aspect ratio",
+    "prompt": "a futuristic city",
     "webhook_url": "YOUR_N8N_WEBHOOK_URL",
     "job_id": "123",
     "cookies_b64": "IyBOZXRzY2FwZ...",
-    "action": "text_to_image"
+    "action": "text_to_image",
+    "aspect_ratio": "16:9"
   }
 }
 ```
@@ -57,11 +58,12 @@ Use the **HTTP Request** node in n8n with the following settings:
 {
   "event_type": "generate_video",
   "client_payload": {
-    "prompt": "a cute cat in space, 9:16 aspect ratio",
+    "prompt": "a cute cat in space",
     "webhook_url": "YOUR_N8N_WEBHOOK_URL",
     "job_id": "123",
     "cookies_b64": "IyBOZXRzY2FwZ...",
-    "action": "animate_generation"
+    "action": "animate_generation",
+    "aspect_ratio": "9:16"
   }
 }
 ```
