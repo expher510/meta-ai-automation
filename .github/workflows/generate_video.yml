@@ -16,10 +16,11 @@ on:
         description: 'Base64 encoded Netscape HTTP Cookie string'
         required: true
         type: string
-      job_id:                          
+      job_id:
         description: 'Job ID to track the request'
         required: false
         type: string
+
 jobs:
   run-automation:
     runs-on: ubuntu-latest
@@ -32,24 +33,29 @@ jobs:
         with:
           python-version: '3.10'
 
-      # ─── Cache pip + Playwright ───────────────────────────
-      - name: Cache dependencies
+      # ─── Cache pip + Playwright ────────────────────────────────
+      # أول run: بيحمل كل حاجة ويحفظها على GitHub Cache Storage
+      # كل run بعد كده: بيجيب من الـ Cache (20 ثانية بدل 5 دقايق)
+      - name: Cache pip + Playwright browsers
         uses: actions/cache@v3
         id: cache-deps
         with:
           path: |
             ~/.cache/pip
             ~/.cache/ms-playwright
-          key: deps-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-      # ──────────────────────────────────────────────────────
+          key: deps-${{ runner.os }}-py3.10-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            deps-${{ runner.os }}-py3.10-
+      # ──────────────────────────────────────────────────────────
 
+      # ✅ بيشتغل دايماً — لكن بيبقى سريع جداً لو الـ cache موجود
       - name: Install dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
+      # ─── Save Cookies ──────────────────────────────────────────
       - name: Save Cookies to File (Workflow Dispatch)
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -59,7 +65,9 @@ jobs:
         if: github.event_name == 'repository_dispatch'
         run: |
           jq -r '.client_payload.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
+      # ──────────────────────────────────────────────────────────
 
+      # ─── Run Script ────────────────────────────────────────────
       - name: Run Playwright Script (Workflow Dispatch)
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -77,7 +85,9 @@ jobs:
             --webhook "${{ github.event.client_payload.webhook_url }}" \
             --cookies cookies.txt \
             --job-id "${{ github.event.client_payload.job_id }}"
+      # ──────────────────────────────────────────────────────────
 
+      # ─── On Failure ────────────────────────────────────────────
       - name: Upload Error Screenshot
         if: failure()
         uses: actions/upload-artifact@v4
@@ -85,3 +95,4 @@ jobs:
           name: error-screenshot
           path: error_screenshot.png
           if-no-files-found: ignore
+      # ──────────────────────────────────────────────────────────
